@@ -867,7 +867,7 @@ function et(e) {
 }
 var P = [], F = !1, I, tt = -1;
 function nt() {
-	!F || !I || (F = !1, I.length ? P = I.concat(P) : tt = -1, P.length && rt());
+	F && I && (F = !1, I.length ? P = I.concat(P) : tt = -1, P.length && rt());
 }
 function rt() {
 	if (!F) {
@@ -1432,7 +1432,7 @@ K.prototype.wrap = function(e) {
 		}
 		r.push(null);
 	}), e.on("data", function(i) {
-		G("wrapped data"), t.decoder && (i = t.decoder.write(i)), !(t.objectMode && i == null) && (!t.objectMode && (!i || !i.length) || r.push(i) || (n = !0, e.pause()));
+		G("wrapped data"), t.decoder && (i = t.decoder.write(i)), !(t.objectMode && i == null) && (t.objectMode || i && i.length) && (r.push(i) || (n = !0, e.pause()));
 	}), e) this[i] === void 0 && typeof e[i] == "function" && (this[i] = function(t) {
 		return function() {
 			return e[t].apply(e, arguments);
@@ -2190,8 +2190,8 @@ var Bn = function(e) {
 					this.state.bomSkipped = !0;
 				}
 			}
-			let ie = w.length, T;
-			for (T = 0; T < ie && !this.__needMoreData(T, ie, t); T++) {
+			let ie = w.length, T = 0;
+			for (; T < ie && !this.__needMoreData(T, ie, t); T++) {
 				if (this.state.wasRowDelimiter === !0 && (this.info.lines++, this.state.wasRowDelimiter = !1), g !== -1 && this.info.lines > g) {
 					this.state.stop = !0, r();
 					return;
