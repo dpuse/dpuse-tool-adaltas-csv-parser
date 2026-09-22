@@ -1,6 +1,6 @@
 {
     "name": "@dpuse/dpuse-tool-adaltas-csv-parser",
-    "version": "0.0.157",
+    "version": "0.0.158",
     "private": false,
     "description": "",
     "license": "MIT",
@@ -27,16 +27,27 @@
         "dist"
     ],
     "engines": {
-        "node": ">=23.11",
-        "npm": ">=11"
+        "node": ">=24",
+        "npm": ">=12"
+    },
+    "devEngines": {
+        "runtime": {
+            "name": "node",
+            "version": ">=24",
+            "onFail": "error"
+        },
+        "packageManager": {
+            "name": "npm",
+            "version": ">=12",
+            "onFail": "error"
+        }
     },
     "prettier": "@dpuse/dpuse-development/prettierrc",
     "allowScripts": {
         "esbuild@0.28.1": true,
         "fsevents@2.3.3": true,
-        "sharp@0.34.5": true,
         "unrs-resolver@1.12.2": true,
-        "workerd@1.20260918.1": true
+        "workerd@1.20260921.1": true
     },
     "scripts": {
         "audit": "node -e \"import('@dpuse/dpuse-development').then(m => m.auditDependencies())\"",
@@ -59,16 +70,16 @@
         "csv-parse": "^7.0.2"
     },
     "devDependencies": {
-        "@dpuse/dpuse-development": "^0.3.706",
-        "@dpuse/eslint-config-dpuse": "^1.0.116",
+        "@dpuse/dpuse-development": "^0.3.716",
+        "@dpuse/eslint-config-dpuse": "^1.0.117",
         "@types/node": "^26.6.2",
         "eslint": "^10.11.0",
         "prettier": "^3.9.8",
         "sonda": "^0.14.0",
         "typescript": "^5.9.3",
         "vite": "^8.3.0",
-        "vite-plugin-dts": "^5.1.0",
+        "vite-plugin-dts": "^5.1.1",
         "vitest": "^5.0.1",
-        "wrangler": "^4.135.0"
+        "wrangler": "^4.136.2"
     }
 }
