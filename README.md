@@ -1,8 +1,5 @@
 # Data Positioning CSV Parse Tool
 
-[![npm version](https://img.shields.io/npm/v/@dpuse/dpuse-tool-adaltas-csv-parser.svg)](https://www.npmjs.com/package/@dpuse/dpuse-tool-adaltas-csv-parser)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-
 <!-- OPENING_START -->
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
