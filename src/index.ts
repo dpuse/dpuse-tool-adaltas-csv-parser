@@ -3,9 +3,8 @@ import { type Options, parse, type Parser } from 'csv-parse/browser/esm';
 export type { Options, Parser } from 'csv-parse/browser/esm';
 
 // ── DPUse Framework
-import { buildFetchError, ignoreErrors } from '@dpuse/dpuse-shared/errors';
-import type { ParsingRecord, RecordDelimiterId, ValueDelimiterId } from '@dpuse/dpuse-shared/component/dataView';
-import type { RecordRetrievalTypeId, RetrieveRecordsOptions, RetrieveRecordsSummary } from '@dpuse/dpuse-shared/component/module/connector';
+import { buildFetchError, ignoreErrors } from '@dpuse/dpuse-shared';
+import type { ParsingRecord, RecordDelimiterId, RecordRetrievalTypeId, RetrieveRecordsOptions, RetrieveRecordsSummary, ValueDelimiterId } from '@dpuse/dpuse-shared';
 
 // ── Types ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -40,7 +39,7 @@ const DEFAULT_OPTIONS: Options = {
     comment: '',
     comment_no_infix: false,
     delimiter: ',',
-    encoding: 'utf8',
+    encoding: 'utf-8',
     escape: '"',
     from: 1,
     from_line: 1,
