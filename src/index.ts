@@ -297,6 +297,9 @@ async function determineValueDelimiter(text: string, delimiters: ValueDelimiterI
                         resolve(); // Ignore errors. Assume invalid delimiter caused parsing error.
                     });
                     parser.on('end', (): void => {
+                        // TODO: Empty text gives no records, so the average below is 0 / 0 = NaN, every delimiter passes
+                        // the check and the last one tried wins. Skip a delimiter that produced no records, so empty text
+                        // falls back to ',' as intended.
                         const averageValueCount = totalValueCount / recordCount;
                         if ((!priorSumCountDiffs || sumOfValueCountDiffs <= priorSumCountDiffs) && (!priorAverageCount || averageValueCount > priorAverageCount)) {
                             valueDelimiterId = delimiter;
