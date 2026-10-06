@@ -75,6 +75,19 @@ describe('Tool', () => {
             expect(summary).toEqual({ byteCount: 16, commentLineCount: 0, emptyLineCount: 1, lineCount: 5, nonUniformRecordCount: 0, recordCount: 4 });
         });
 
+        // 'MacRoman' is the name jschardet reports; browsers only decode it as 'macintosh', where 0x8e is 'é'.
+        it('decodes with the browser name for the encoding id', async () => {
+            const macRomanBytes = new Uint8Array([0x63, 0x61, 0x66, 0x8e, 0x2c, 0x31, 0x0a]); // 'café,1' and a line break.
+            vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(macRomanBytes)));
+            const chunks: unknown[][][] = [];
+
+            await new Tool().parseStream({ chunkSize: 10, encodingId: 'MacRoman' } as never, {}, URL, new AbortController(), (_typeId, records) => {
+                chunks.push([...records]);
+            });
+
+            expect(chunks.map((records) => readValues(records))).toEqual([[['café', '1']]]);
+        });
+
         it('rejects when the file cannot be fetched', async () => {
             vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('missing', { status: 404, statusText: 'Not Found' })));
             const abortController = new AbortController();

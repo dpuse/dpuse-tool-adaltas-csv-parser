@@ -3,7 +3,7 @@ import { type Options, parse, type Parser } from 'csv-parse/browser/esm';
 export type { Options, Parser } from 'csv-parse/browser/esm';
 
 // ── DPUse Framework
-import { buildFetchError, ignoreErrors } from '@dpuse/dpuse-shared';
+import { buildFetchError, ignoreErrors, resolveDecoderId } from '@dpuse/dpuse-shared';
 import type { ParsingRecord, RecordDelimiterId, RecordRetrievalTypeId, RetrieveRecordsOptions, RetrieveRecordsSummary, ValueDelimiterId } from '@dpuse/dpuse-shared';
 
 // ── Types ────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -148,7 +148,7 @@ export class Tool {
                 }
 
                 reader = response.body.getReader();
-                const decoder = new TextDecoder(retrieveRecordsOptions.encodingId);
+                const decoder = new TextDecoder(resolveDecoderId(retrieveRecordsOptions.encodingId));
                 let result = await reader.read();
                 while (!result.done) {
                     if (hasErrored) return;
