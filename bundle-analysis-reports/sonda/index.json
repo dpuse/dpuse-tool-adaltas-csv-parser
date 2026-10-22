@@ -1,7 +1,7 @@
 {
   "metadata": {
     "version": "0.14.0",
-    "generatedAt": "2026-10-06T12:15:18.156Z",
+    "generatedAt": "2026-10-22T11:02:25.373Z",
     "integration": "vite",
     "sources": false,
     "gzip": true,
@@ -21,8 +21,8 @@
       "name": "[unassigned]",
       "type": "other",
       "format": "other",
-      "uncompressed": 7451,
-      "gzip": 435,
+      "uncompressed": 7573,
+      "gzip": 427,
       "brotli": 0,
       "parent": "dist/dpuse-tool-adaltas-csv-parser.es.js"
     },
@@ -30,8 +30,8 @@
       "kind": "asset",
       "name": "dist/dpuse-tool-adaltas-csv-parser.es.js",
       "type": "script",
-      "uncompressed": 128250,
-      "gzip": 32096,
+      "uncompressed": 129221,
+      "gzip": 32524,
       "brotli": 0
     },
     {
@@ -39,15 +39,15 @@
       "name": "node_modules/@dpuse/dpuse-shared/dist/dpuse-shared.es.js",
       "type": "script",
       "format": "esm",
-      "uncompressed": 35924
+      "uncompressed": 38173
     },
     {
       "kind": "chunk",
       "name": "node_modules/@dpuse/dpuse-shared/dist/dpuse-shared.es.js",
       "type": "script",
       "format": "esm",
-      "uncompressed": 15339,
-      "gzip": 4182,
+      "uncompressed": 16039,
+      "gzip": 4515,
       "brotli": 0,
       "parent": "dist/dpuse-tool-adaltas-csv-parser.es.js"
     },
@@ -63,8 +63,8 @@
       "name": "node_modules/csv-parse/dist/esm/index.js",
       "type": "script",
       "format": "esm",
-      "uncompressed": 101703,
-      "gzip": 25895,
+      "uncompressed": 101579,
+      "gzip": 25878,
       "brotli": 0,
       "parent": "dist/dpuse-tool-adaltas-csv-parser.es.js"
     },
@@ -73,15 +73,15 @@
       "name": "src/index.ts",
       "type": "script",
       "format": "esm",
-      "uncompressed": 8345
+      "uncompressed": 9181
     },
     {
       "kind": "chunk",
       "name": "src/index.ts",
       "type": "script",
       "format": "esm",
-      "uncompressed": 3757,
-      "gzip": 1583,
+      "uncompressed": 4030,
+      "gzip": 1704,
       "brotli": 0,
       "parent": "dist/dpuse-tool-adaltas-csv-parser.es.js"
     }

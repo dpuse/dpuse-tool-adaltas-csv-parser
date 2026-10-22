@@ -3,8 +3,8 @@
 <!-- OPENING_START -->
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![DPUse version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.dpuse.app%2Fconfigs%2Fdpuse-tool-adaltas-csv-parser&query=%24.data.version&prefix=v&label=DPUse&color=f6821f)](https://github.com/dpuse/dpuse-tool-adaltas-csv-parser/releases/latest)
-[![npm version](https://img.shields.io/npm/v/@dpuse/dpuse-tool-adaltas-csv-parser?color=cb3837&label=npm)](https://www.npmjs.com/package/@dpuse/dpuse-tool-adaltas-csv-parser)
+[![DPUse version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.dpuse.app%2Fconfigs%2Fdpuse-tool-adaltas-csv-parser&query=%24.data.version&prefix=v&label=DPUse&color=blue)](https://github.com/dpuse/dpuse-tool-adaltas-csv-parser/releases/latest)
+[![npm version](https://img.shields.io/npm/v/@dpuse/dpuse-tool-adaltas-csv-parser?label=npm)](https://www.npmjs.com/package/@dpuse/dpuse-tool-adaltas-csv-parser)
 [![CI](https://github.com/dpuse/dpuse-tool-adaltas-csv-parser/actions/workflows/ci.yml/badge.svg)](https://github.com/dpuse/dpuse-tool-adaltas-csv-parser/actions/workflows/ci.yml)
 
 ...
@@ -61,7 +61,7 @@ License data is updated each time `npm run document` is run, using [license-chec
 
 | Dependency                                                   | Version | License(s) | Document                                                              |
 | :----------------------------------------------------------- | :-----: | :--------- | :-------------------------------------------------------------------- |
-| [@dpuse/dpuse-shared](https://github.com/dpuse/dpuse-shared) | 1.0.113 | MIT        | [LICENSE](licenses/downloads/@dpuse/dpuse-shared@1.0.113-LICENSE.txt) |
+| [@dpuse/dpuse-shared](https://github.com/dpuse/dpuse-shared) | 1.0.130 | MIT        | [LICENSE](licenses/downloads/@dpuse/dpuse-shared@1.0.130-LICENSE.txt) |
 | [csv-parse](https://github.com/adaltas/node-csv)             |  7.0.3  | MIT        | [LICENSE](licenses/downloads/csv-parse@7.0.3-LICENSE.txt)             |
 | [valibot](https://github.com/open-circle/valibot)            |  1.5.0  | MIT        | [LICENSE](licenses/downloads/valibot@1.5.0-LICENSE.txt)               |
 
@@ -69,8 +69,8 @@ License data is updated each time `npm run document` is run, using [license-chec
 
 The dependency tree below shows how each package in the table above is reached — direct and transitive — along with its installed version, release date, and update status. A package that does not ship itself, such as one whose parts are bundled separately, is left out and what ships beneath it is shown in its place. Packages flagged ❗ have a newer version available; ⚠️ indicates a package that hasn't been updated in the last 6 months or longer. Neither flag necessarily indicates a problem: we let new releases stabilise before upgrading, and some packages are mature and stable (have limited or no dependencies), so they require no active development.
 
-- **[@dpuse/dpuse-shared](https://github.com/dpuse/dpuse-shared)** 1.0.113 — this month: 2026-10-05 → latest: 1.0.116 — this month: 2026-10-06 ❗
-    - **[valibot](https://github.com/open-circle/valibot)** 1.5.0 — this month: 2026-09-09
+- **[@dpuse/dpuse-shared](https://github.com/dpuse/dpuse-shared)** 1.0.130 — this month: 2026-10-21
+    - **[valibot](https://github.com/open-circle/valibot)** 1.5.0 — 1 mth ago: 2026-09-09
 - **[csv-parse](https://github.com/adaltas/node-csv)** 7.0.3 — this month: 2026-09-25
 
 <!-- DEPENDENCY_LICENSES_END -->
@@ -83,13 +83,13 @@ This report is updated with each release, from the bundle the release builds, us
 
 _Note: Sonda's Vite reports currently exclude CSS files, since Vite does not generate source maps for CSS._
 
-| Chunk/Module/File                                                     | Composition                                   |
-| :-------------------------------------------------------------------- | :-------------------------------------------- |
-| **dist/dpuse-tool-adaltas-csv-parser.es.js**                          | 125.2 kB · gzip 31.3 kB · 100.0% of the build |
-| &nbsp;&nbsp;&nbsp;&nbsp;csv-parse → dist/esm/index.js                 | `████████████████░░░░` 79.3% · 99.3 kB        |
-| &nbsp;&nbsp;&nbsp;&nbsp;@dpuse/dpuse-shared → dist/dpuse-shared.es.js | `██░░░░░░░░░░░░░░░░░░` 12.0% · 15.0 kB        |
-| &nbsp;&nbsp;&nbsp;&nbsp;src → index.ts                                | `█░░░░░░░░░░░░░░░░░░░` 2.9% · 3.7 kB          |
-| &nbsp;&nbsp;&nbsp;&nbsp;(bundler output, whitespace & JSON)           | `█░░░░░░░░░░░░░░░░░░░` 5.8% · 7.3 kB          |
+| Chunk/Module/File                                                     | Composition                                                                                     |
+| :-------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
+| **dist/dpuse-tool-adaltas-csv-parser.es.js**                          | 126.2&nbsp;kB&nbsp;·&nbsp;gzip&nbsp;31.8&nbsp;kB&nbsp;·&nbsp;100.0%&nbsp;of&nbsp;the&nbsp;build |
+| &nbsp;&nbsp;&nbsp;&nbsp;csv-parse → dist/esm/index.js                 | `████████████████░░░░`&nbsp;78.6%&nbsp;·&nbsp;99.2&nbsp;kB                                      |
+| &nbsp;&nbsp;&nbsp;&nbsp;@dpuse/dpuse-shared → dist/dpuse-shared.es.js | `██░░░░░░░░░░░░░░░░░░`&nbsp;12.4%&nbsp;·&nbsp;15.7&nbsp;kB                                      |
+| &nbsp;&nbsp;&nbsp;&nbsp;src → index.ts                                | `█░░░░░░░░░░░░░░░░░░░`&nbsp;3.1%&nbsp;·&nbsp;3.9&nbsp;kB                                        |
+| &nbsp;&nbsp;&nbsp;&nbsp;(bundler output, whitespace & JSON)           | `█░░░░░░░░░░░░░░░░░░░`&nbsp;5.9%&nbsp;·&nbsp;7.4&nbsp;kB                                        |
 
 Bars show each row's share of its output file.
 
@@ -105,10 +105,11 @@ This section is updated each time `npm run document` is run. Settings come from 
 
 ### Testing
 
-| Check                | Status | What it does                                                                                                                                                                                           |
-| :------------------- | :----- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unit tests           | ✅ On  | [Vitest](https://vitest.dev) runs the unit tests. Part of the [CI workflow](https://github.com/dpuse/dpuse-tool-adaltas-csv-parser/actions/workflows/ci.yml) on every push and pull request to `main`. |
-| Property-based tests | ❌ Off | [fast-check](https://fast-check.dev) runs many random inputs per test to find edge cases, alongside the unit tests.                                                                                    |
+| Check                | Status | What it does                                                                                                                                                                                                                                                                                                            |
+| :------------------- | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit tests           | ✅ On  | [Vitest](https://vitest.dev) runs the unit tests. Part of the [CI workflow](https://github.com/dpuse/dpuse-tool-adaltas-csv-parser/actions/workflows/ci.yml) on every push and pull request to `main`.                                                                                                                  |
+| Property-based tests | ❌ Off | [fast-check](https://fast-check.dev) runs many random inputs per test to find edge cases, alongside the unit tests.                                                                                                                                                                                                     |
+| Test coverage        | ✅ On  | ![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdpuse%2Fdpuse-tool-adaltas-csv-parser%2Fmain%2Fcode-health-reports%2Fvitest%2Fbadge.json) [Vitest's V8 coverage](https://vitest.dev/guide/coverage) measures the share of source lines the unit tests run. The target is 80%. |
 
 ### Code Quality
 

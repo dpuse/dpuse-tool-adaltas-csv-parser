@@ -11,7 +11,7 @@ import type { ParsingRecord, RecordDelimiterId, RecordRetrievalTypeId, RetrieveR
 export interface ParseTextResult {
     parsedRecords: ParsingRecord[];
     recordDelimiterId: RecordDelimiterId;
-    valueDelimiterId: ValueDelimiterId;
+    valueDelimiterId: ValueDelimiterId | undefined; // Undefined when the text is not delimited.
 }
 
 interface StreamRecordBuffer {
@@ -247,14 +247,15 @@ function determineRecordDelimiter(text: string): RecordDelimiterId {
     const countCR = (text.match(/\r(?!\n)/g) ?? []).length; // Count all '\r' characters not followed by '\n' character.
     if (countCRLF >= countLF && countCRLF >= countCR) return '\r\n';
     if (countLF >= countCRLF && countLF >= countCR) return '\n';
-    if (countCR >= countCRLF && countCR >= countLF) return '\r';
-    return '\n'; // Default to '\n' character if all counts are equal or zero.
+    return countCR >= countCRLF && countCR >= countLF ? '\r' : '\n'; // Default to '\n' character if all counts are equal or zero.
 }
 
 /**
- * Determine value delimiter.
+ * Determine value delimiter. Undefined when the text is not delimited: the best delimiter found does not split most
+ * records into the same number of values, more than one, as a table's rows would be. The records parsed with it are
+ * still returned, so the text can be shown as a table if the user chooses.
  */
-async function determineValueDelimiter(text: string, delimiters: ValueDelimiterId[]): Promise<{ parsedRecords: ParsingRecord[]; valueDelimiterId: ValueDelimiterId }> {
+async function determineValueDelimiter(text: string, delimiters: ValueDelimiterId[]): Promise<{ parsedRecords: ParsingRecord[]; valueDelimiterId: ValueDelimiterId | undefined }> {
     let valueDelimiterId: ValueDelimiterId | undefined;
     let priorAverageCount: number;
     let priorSumCountDiffs: number;
@@ -297,9 +298,10 @@ async function determineValueDelimiter(text: string, delimiters: ValueDelimiterI
                         resolve(); // Ignore errors. Assume invalid delimiter caused parsing error.
                     });
                     parser.on('end', (): void => {
-                        // TODO: Empty text gives no records, so the average below is 0 / 0 = NaN, every delimiter passes
-                        // the check and the last one tried wins. Skip a delimiter that produced no records, so empty text
-                        // falls back to ',' as intended.
+                        if (recordCount === 0) {
+                            resolve(); // Nothing to compare, and the average below would be 0 / 0.
+                            return;
+                        }
                         const averageValueCount = totalValueCount / recordCount;
                         if ((!priorSumCountDiffs || sumOfValueCountDiffs <= priorSumCountDiffs) && (!priorAverageCount || averageValueCount > priorAverageCount)) {
                             valueDelimiterId = delimiter;
@@ -320,5 +322,13 @@ async function determineValueDelimiter(text: string, delimiters: ValueDelimiterI
         }
     }
 
-    return { parsedRecords, valueDelimiterId: valueDelimiterId ?? ',' };
+    return { parsedRecords, valueDelimiterId: valueDelimiterId != null && isTabular(parsedRecords) ? valueDelimiterId : undefined };
+}
+
+// Most records have the same number of values, more than one. Ragged rows are allowed, as the parser allows them.
+function isTabular(parsedRecords: ParsingRecord[]): boolean {
+    const recordCountByValueCount = new Map<number, number>();
+    for (const record of parsedRecords) recordCountByValueCount.set(record.length, (recordCountByValueCount.get(record.length) ?? 0) + 1);
+    const [commonValueCount = 0, commonRecordCount = 0] = [...recordCountByValueCount].toSorted((left, right) => right[1] - left[1])[0] ?? [];
+    return commonValueCount > 1 && commonRecordCount * 2 > parsedRecords.length;
 }

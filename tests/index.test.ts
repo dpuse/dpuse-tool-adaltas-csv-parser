@@ -33,6 +33,29 @@ describe('Tool', () => {
             ]);
         });
 
+        it.each([
+            ['prose with commas in some lines', 'The quick brown fox.\nIt jumped, then ran, then hid.\nThe end.\nNothing more to say, really.\n'],
+            ['a single column of values', 'Ada\nGrace\nKatherine\n'],
+            ['empty text', '']
+        ])('reports %s as not delimited', async (_description, text) => {
+            const result = await new Tool().parseText(text, [',', ';', '\t']);
+
+            expect(result.valueDelimiterId).toBeUndefined();
+        });
+
+        it('allows a few ragged rows in delimited text', async () => {
+            const result = await new Tool().parseText('name,age,city\nAda,36,London\nGrace,85\nKatherine,101,Hampton\n', [',', ';']);
+
+            expect(result.valueDelimiterId).toBe(',');
+        });
+
+        it('keeps the records of text that is not delimited, so it can still be shown as a table', async () => {
+            const result = await new Tool().parseText('Ada\nGrace\n', [',']);
+
+            expect(result.valueDelimiterId).toBeUndefined();
+            expect(readValues(result.parsedRecords)).toEqual([['Ada'], ['Grace']]);
+        });
+
         it('notes which values were quoted', async () => {
             const result = await new Tool().parseText('"a",b\n', [',']);
 
