@@ -247,7 +247,7 @@ function determineRecordDelimiter(text: string): RecordDelimiterId {
     const countCR = (text.match(/\r(?!\n)/g) ?? []).length; // Count all '\r' characters not followed by '\n' character.
     if (countCRLF >= countLF && countCRLF >= countCR) return '\r\n';
     if (countLF >= countCRLF && countLF >= countCR) return '\n';
-    return countCR >= countCRLF && countCR >= countLF ? '\r' : '\n'; // Default to '\n' character if all counts are equal or zero.
+    return countCR >= countCRLF && countCR >= countLF ? '\r' : '\n'; // Ties, including text with no line break, go to '\r\n' above, so the '\n' here is never reached.
 }
 
 /**
