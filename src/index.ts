@@ -54,6 +54,9 @@ const DEFAULT_OPTIONS: Options = {
     relax_column_count: false,
     relax_column_count_less: false,
     relax_column_count_more: false,
+    // TODO: Offer relaxed quotes as a choice, for files the user knows are messy, e.g. a stray quote in '5" screen'.
+    // Strict parsing stays the default. 'parseText' for the preview and the connectors' full reads would both take the
+    // user's choice, so the two always read a file the same way. It belongs with the planned 'Read as' override.
     relax_quotes: false,
     rtrim: false,
     skip_empty_lines: false,
@@ -253,13 +256,17 @@ function determineRecordDelimiter(text: string): RecordDelimiterId {
 /**
  * Determine value delimiter. Undefined when the text is not delimited: the best delimiter found does not split most
  * records into the same number of values, more than one, as a table's rows would be. The records parsed with it are
- * still returned, so the text can be shown as a table if the user chooses.
+ * still returned, so the text can be shown as a table if the user chooses. Parsing is strict. A delimiter whose parse
+ * fails is ruled out, because a wrong delimiter can itself cause a quote error. When every delimiter fails, the error is
+ * thrown, so the user learns why the text cannot be read.
  */
 async function determineValueDelimiter(text: string, delimiters: ValueDelimiterId[]): Promise<{ parsedRecords: ParsingRecord[]; valueDelimiterId: ValueDelimiterId | undefined }> {
     let valueDelimiterId: ValueDelimiterId | undefined;
-    let priorAverageCount: number;
-    let priorSumCountDiffs: number;
+    let priorAverageCount: number | undefined;
+    let priorSumCountDiffs: number | undefined;
     let parsedRecords: ParsingRecord[] = [];
+    let firstError: Error | undefined;
+    let hasParsedWithoutError = false;
 
     /* TODO: Could improve performance by limiting the number of delimiters
        processed by exiting if column count is the same for each line and
@@ -268,61 +275,63 @@ async function determineValueDelimiter(text: string, delimiters: ValueDelimiterI
        less common? */
 
     for (const delimiter of delimiters) {
-        try {
-            let totalValueCount = 0;
-            let priorValueCount: number | undefined;
-            let recordCount = 0;
-            let sumOfValueCountDiffs = 0;
-
-            const parser = parse({
-                ...DEFAULT_OPTIONS,
-                cast: (value, context): { value: string; wasValueQuoted: boolean } => ({ value, wasValueQuoted: context.quoting }),
-                delimiter,
-                relax_column_count: true
-            });
-            await new Promise<void>((resolve): void => {
-                try {
-                    const pendingRecords: ParsingRecord[] = [];
-                    parser.on('readable', (): void => {
-                        let record;
-                        while ((record = parser.read() as ParsingRecord | null) != null) {
-                            recordCount++;
-                            const valueCount = record.length;
-                            if (priorValueCount != null) sumOfValueCountDiffs += Math.abs(valueCount - priorValueCount);
-                            priorValueCount = valueCount;
-                            totalValueCount += valueCount;
-                            pendingRecords.push(record);
-                        }
-                    });
-                    parser.on('error', (): void => {
-                        resolve(); // Ignore errors. Assume invalid delimiter caused parsing error.
-                    });
-                    parser.on('end', (): void => {
-                        if (recordCount === 0) {
-                            resolve(); // Nothing to compare, and the average below would be 0 / 0.
-                            return;
-                        }
-                        const averageValueCount = totalValueCount / recordCount;
-                        if ((!priorSumCountDiffs || sumOfValueCountDiffs <= priorSumCountDiffs) && (!priorAverageCount || averageValueCount > priorAverageCount)) {
-                            valueDelimiterId = delimiter;
-                            priorAverageCount = averageValueCount;
-                            priorSumCountDiffs = sumOfValueCountDiffs;
-                            parsedRecords = [...pendingRecords];
-                        }
-                        resolve();
-                    });
-                    parser.write(text);
-                    parser.end();
-                } catch {
-                    resolve(); // Ignore errors. Assume invalid delimiter caused parsing error.
-                }
-            });
-        } catch {
-            // Ignore errors. Assume invalid delimiter caused parsing error.
+        const { error, records } = await parseTextWithDelimiter(text, delimiter);
+        if (error != null) {
+            firstError ??= error;
+            continue;
         }
+        hasParsedWithoutError = true;
+        if (records.length === 0) continue; // Nothing to compare, and the average below would be 0 / 0.
+        const { averageValueCount, sumOfValueCountDiffs } = measureValueCounts(records);
+        const isBetterFit = (!priorSumCountDiffs || sumOfValueCountDiffs <= priorSumCountDiffs) && (!priorAverageCount || averageValueCount > priorAverageCount);
+        if (!isBetterFit) continue;
+        valueDelimiterId = delimiter;
+        priorAverageCount = averageValueCount;
+        priorSumCountDiffs = sumOfValueCountDiffs;
+        parsedRecords = records;
     }
 
+    if (!hasParsedWithoutError && firstError != null) throw firstError;
     return { parsedRecords, valueDelimiterId: valueDelimiterId != null && isTabular(parsedRecords) ? valueDelimiterId : undefined };
+}
+
+// The preview ends at a line break, which can fall inside a quoted value that spans lines. A quote still open at the end
+// is therefore not an error here, and the records before it are kept. A full read treats it as one. Records are taken
+// as each is parsed, from 'data' events, because those still buffered are lost when an error stops the parser.
+function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId): Promise<{ error?: Error; records: ParsingRecord[] }> {
+    return new Promise((resolve) => {
+        const records: ParsingRecord[] = [];
+        const parser = parse({
+            ...DEFAULT_OPTIONS,
+            cast: (value, context): { value: string; wasValueQuoted: boolean } => ({ value, wasValueQuoted: context.quoting }),
+            delimiter,
+            relax_column_count: true
+        });
+        parser.on('data', (record: ParsingRecord) => {
+            records.push(record);
+        });
+        parser.on('error', (error: Error & { code?: string }) => {
+            resolve(error.code === 'CSV_QUOTE_NOT_CLOSED' ? { records } : { error, records });
+        });
+        parser.on('end', () => {
+            resolve({ records });
+        });
+        parser.write(text);
+        parser.end();
+    });
+}
+
+// The average number of values per record, and how much that number changes from one record to the next.
+function measureValueCounts(records: ParsingRecord[]): { averageValueCount: number; sumOfValueCountDiffs: number } {
+    let totalValueCount = 0;
+    let sumOfValueCountDiffs = 0;
+    let priorValueCount: number | undefined;
+    for (const record of records) {
+        if (priorValueCount != null) sumOfValueCountDiffs += Math.abs(record.length - priorValueCount);
+        priorValueCount = record.length;
+        totalValueCount += record.length;
+    }
+    return { averageValueCount: totalValueCount / records.length, sumOfValueCountDiffs };
 }
 
 // Most records have the same number of values, more than one. Ragged rows are allowed, as the parser allows them.

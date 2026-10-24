@@ -56,6 +56,30 @@ describe('Tool', () => {
             expect(readValues(result.parsedRecords)).toEqual([['Ada'], ['Grace']]);
         });
 
+        it('reports a quote error that every delimiter meets', async () => {
+            await expect(new Tool().parseText('a,b\nab"c,1\n', [',', ';'])).rejects.toThrow(/Invalid Opening Quote.*line 2/);
+        });
+
+        it('rules out a delimiter whose parse fails', async () => {
+            const result = await new Tool().parseText('"x,y";1\n"z,w";2\n', [',', ';']);
+
+            expect(result.valueDelimiterId).toBe(';');
+            expect(readValues(result.parsedRecords)).toEqual([
+                ['x,y', '1'],
+                ['z,w', '2']
+            ]);
+        });
+
+        it('keeps the records before a quoted value cut off at the end of the preview', async () => {
+            const result = await new Tool().parseText('a,b\n1,2\n3,"multi\nline', [',']);
+
+            expect(result.valueDelimiterId).toBe(',');
+            expect(readValues(result.parsedRecords)).toEqual([
+                ['a', 'b'],
+                ['1', '2']
+            ]);
+        });
+
         it('notes which values were quoted', async () => {
             const result = await new Tool().parseText('"a",b\n', [',']);
 
@@ -76,6 +100,12 @@ describe('Tool', () => {
     });
 
     describe('parseStream', () => {
+        it('stops with the parse error when a value holds a stray quote', async () => {
+            stubFetchText('a,b\nab"c,1\n');
+
+            await expect(new Tool().parseStream({ chunkSize: 10 } as never, {}, URL, new AbortController(), vi.fn())).rejects.toThrow(/Invalid Opening Quote/);
+        });
+
         it('streams records in chunks of the requested size, then summarises them', async () => {
             stubFetchText('a,b\n1,2\n3,4\n5,6\n');
             const chunks: unknown[][][] = [];
