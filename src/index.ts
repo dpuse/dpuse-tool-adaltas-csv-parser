@@ -175,11 +175,12 @@ export class Tool {
     }
 
     /**
-     * Parse text.
+     * Parse text. 'isComplete' says whether the text is the whole file rather than a preview of its start, so a quote
+     * still open at its end is an error rather than a value the preview cut off. Not complete by default.
      */
-    async parseText(text: string, delimiters: ValueDelimiterId[]): Promise<ParseTextResult> {
+    async parseText(text: string, delimiters: ValueDelimiterId[], isComplete = false): Promise<ParseTextResult> {
         const recordDelimiterId = determineRecordDelimiter(text);
-        const { parsedRecords, valueDelimiterId } = await determineValueDelimiter(text, delimiters);
+        const { parsedRecords, valueDelimiterId } = await determineValueDelimiter(text, delimiters, isComplete);
         return { parsedRecords, recordDelimiterId, valueDelimiterId };
     }
 }
@@ -260,7 +261,11 @@ function determineRecordDelimiter(text: string): RecordDelimiterId {
  * fails is ruled out, because a wrong delimiter can itself cause a quote error. When every delimiter fails, the error is
  * thrown, so the user learns why the text cannot be read.
  */
-async function determineValueDelimiter(text: string, delimiters: ValueDelimiterId[]): Promise<{ parsedRecords: ParsingRecord[]; valueDelimiterId: ValueDelimiterId | undefined }> {
+async function determineValueDelimiter(
+    text: string,
+    delimiters: ValueDelimiterId[],
+    isComplete: boolean
+): Promise<{ parsedRecords: ParsingRecord[]; valueDelimiterId: ValueDelimiterId | undefined }> {
     let valueDelimiterId: ValueDelimiterId | undefined;
     let priorAverageCount: number | undefined;
     let priorSumCountDiffs: number | undefined;
@@ -275,7 +280,7 @@ async function determineValueDelimiter(text: string, delimiters: ValueDelimiterI
        less common? */
 
     for (const delimiter of delimiters) {
-        const { error, records } = await parseTextWithDelimiter(text, delimiter);
+        const { error, records } = await parseTextWithDelimiter(text, delimiter, isComplete);
         if (error != null) {
             firstError ??= error;
             continue;
@@ -295,10 +300,11 @@ async function determineValueDelimiter(text: string, delimiters: ValueDelimiterI
     return { parsedRecords, valueDelimiterId: valueDelimiterId != null && isTabular(parsedRecords) ? valueDelimiterId : undefined };
 }
 
-// The preview ends at a line break, which can fall inside a quoted value that spans lines. A quote still open at the end
-// is therefore not an error here, and the records before it are kept. A full read treats it as one. Records are taken
-// as each is parsed, from 'data' events, because those still buffered are lost when an error stops the parser.
-function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId): Promise<{ error?: Error; records: ParsingRecord[] }> {
+// A preview cut short ends at a line break, which can fall inside a quoted value that spans lines. A quote still open at
+// the end of such a preview is therefore not an error, and the records before it are kept. In a whole file it is one.
+// Records are taken as each is parsed, from 'data' events, because those still buffered are lost when an error stops
+// the parser.
+function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isComplete: boolean): Promise<{ error?: Error; records: ParsingRecord[] }> {
     return new Promise((resolve) => {
         const records: ParsingRecord[] = [];
         const parser = parse({
@@ -311,7 +317,7 @@ function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId): Prom
             records.push(record);
         });
         parser.on('error', (error: Error & { code?: string }) => {
-            resolve(error.code === 'CSV_QUOTE_NOT_CLOSED' ? { records } : { error, records });
+            resolve(!isComplete && error.code === 'CSV_QUOTE_NOT_CLOSED' ? { records } : { error, records });
         });
         parser.on('end', () => {
             resolve({ records });

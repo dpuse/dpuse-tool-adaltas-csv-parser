@@ -80,6 +80,10 @@ describe('Tool', () => {
             ]);
         });
 
+        it('reports a quote still open at the end of a whole file', async () => {
+            await expect(new Tool().parseText('a,b\n1,2\n3,"never closed\n', [','], true)).rejects.toThrow(/Quote Not Closed/);
+        });
+
         it('notes which values were quoted', async () => {
             const result = await new Tool().parseText('"a",b\n', [',']);
 
