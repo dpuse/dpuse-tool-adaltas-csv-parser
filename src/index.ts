@@ -76,6 +76,9 @@ export class Tool {
     /**
      * Parse stream.
      */
+    // TODO: An empty file fails here with '"listener" argument must be a function' rather than giving no rows. Seen in
+    // a script reading 'Type Samples/people/people-empty.csv', not yet in the app, which has no full read until the
+    // audit step is built. Reproduce it in this tool's tests first, then make an empty file give zero rows.
     async parseStream(
         retrieveRecordsOptions: RetrieveRecordsOptions,
         parseOptions: Options,

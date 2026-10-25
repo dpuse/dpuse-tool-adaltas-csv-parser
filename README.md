@@ -61,7 +61,7 @@ License data is updated each time `npm run document` is run, using [license-chec
 
 | Dependency                                                   | Version | License(s) | Document                                                              |
 | :----------------------------------------------------------- | :-----: | :--------- | :-------------------------------------------------------------------- |
-| [@dpuse/dpuse-shared](https://github.com/dpuse/dpuse-shared) | 1.0.132 | MIT        | [LICENSE](licenses/downloads/@dpuse/dpuse-shared@1.0.132-LICENSE.txt) |
+| [@dpuse/dpuse-shared](https://github.com/dpuse/dpuse-shared) | 1.0.136 | MIT        | [LICENSE](licenses/downloads/@dpuse/dpuse-shared@1.0.136-LICENSE.txt) |
 | [csv-parse](https://github.com/adaltas/node-csv)             |  7.0.3  | MIT        | [LICENSE](licenses/downloads/csv-parse@7.0.3-LICENSE.txt)             |
 | [valibot](https://github.com/open-circle/valibot)            |  1.5.0  | MIT        | [LICENSE](licenses/downloads/valibot@1.5.0-LICENSE.txt)               |
 
@@ -69,9 +69,9 @@ License data is updated each time `npm run document` is run, using [license-chec
 
 The dependency tree below shows how each package in the table above is reached — direct and transitive — along with its installed version, release date, and update status. A package that does not ship itself, such as one whose parts are bundled separately, is left out and what ships beneath it is shown in its place. Packages flagged ❗ have a newer version available; ⚠️ indicates a package that hasn't been updated in the last 6 months or longer. Neither flag necessarily indicates a problem: we let new releases stabilise before upgrading, and some packages are mature and stable (have limited or no dependencies), so they require no active development.
 
-- **[@dpuse/dpuse-shared](https://github.com/dpuse/dpuse-shared)** 1.0.132 — this month: 2026-10-23
+- **[@dpuse/dpuse-shared](https://github.com/dpuse/dpuse-shared)** 1.0.136 — this month: 2026-10-25
     - **[valibot](https://github.com/open-circle/valibot)** 1.5.0 — 1 mth ago: 2026-09-09
-- **[csv-parse](https://github.com/adaltas/node-csv)** 7.0.3 — this month: 2026-09-25
+- **[csv-parse](https://github.com/adaltas/node-csv)** 7.0.3 — 1 mth ago: 2026-09-25
 
 <!-- DEPENDENCY_LICENSES_END -->
 
@@ -85,9 +85,9 @@ _Note: Sonda's Vite reports currently exclude CSS files, since Vite does not gen
 
 | Chunk/Module/File                                                     | Composition                                                                                     |
 | :-------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
-| **dist/dpuse-tool-adaltas-csv-parser.es.js**                          | 125.8&nbsp;kB&nbsp;·&nbsp;gzip&nbsp;31.6&nbsp;kB&nbsp;·&nbsp;100.0%&nbsp;of&nbsp;the&nbsp;build |
-| &nbsp;&nbsp;&nbsp;&nbsp;csv-parse → dist/esm/index.js                 | `████████████████░░░░`&nbsp;78.9%&nbsp;·&nbsp;99.2&nbsp;kB                                      |
-| &nbsp;&nbsp;&nbsp;&nbsp;@dpuse/dpuse-shared → dist/dpuse-shared.es.js | `██░░░░░░░░░░░░░░░░░░`&nbsp;12.0%&nbsp;·&nbsp;15.1&nbsp;kB                                      |
+| **dist/dpuse-tool-adaltas-csv-parser.es.js**                          | 125.9&nbsp;kB&nbsp;·&nbsp;gzip&nbsp;31.6&nbsp;kB&nbsp;·&nbsp;100.0%&nbsp;of&nbsp;the&nbsp;build |
+| &nbsp;&nbsp;&nbsp;&nbsp;csv-parse → dist/esm/index.js                 | `████████████████░░░░`&nbsp;78.8%&nbsp;·&nbsp;99.2&nbsp;kB                                      |
+| &nbsp;&nbsp;&nbsp;&nbsp;@dpuse/dpuse-shared → dist/dpuse-shared.es.js | `██░░░░░░░░░░░░░░░░░░`&nbsp;12.1%&nbsp;·&nbsp;15.2&nbsp;kB                                      |
 | &nbsp;&nbsp;&nbsp;&nbsp;src → index.ts                                | `█░░░░░░░░░░░░░░░░░░░`&nbsp;3.4%&nbsp;·&nbsp;4.3&nbsp;kB                                        |
 | &nbsp;&nbsp;&nbsp;&nbsp;(bundler output, whitespace & JSON)           | `█░░░░░░░░░░░░░░░░░░░`&nbsp;5.7%&nbsp;·&nbsp;7.2&nbsp;kB                                        |
 
