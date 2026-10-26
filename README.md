@@ -85,10 +85,10 @@ _Note: Sonda's Vite reports currently exclude CSS files, since Vite does not gen
 
 | Chunk/Module/File                                                     | Composition                                                                                     |
 | :-------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
-| **dist/dpuse-tool-adaltas-csv-parser.es.js**                          | 127.0&nbsp;kB&nbsp;·&nbsp;gzip&nbsp;32.0&nbsp;kB&nbsp;·&nbsp;100.0%&nbsp;of&nbsp;the&nbsp;build |
-| &nbsp;&nbsp;&nbsp;&nbsp;csv-parse → dist/esm/index.js                 | `████████████████░░░░`&nbsp;78.1%&nbsp;·&nbsp;99.2&nbsp;kB                                      |
+| **dist/dpuse-tool-adaltas-csv-parser.es.js**                          | 127.2&nbsp;kB&nbsp;·&nbsp;gzip&nbsp;32.1&nbsp;kB&nbsp;·&nbsp;100.0%&nbsp;of&nbsp;the&nbsp;build |
+| &nbsp;&nbsp;&nbsp;&nbsp;csv-parse → dist/esm/index.js                 | `████████████████░░░░`&nbsp;78.0%&nbsp;·&nbsp;99.2&nbsp;kB                                      |
 | &nbsp;&nbsp;&nbsp;&nbsp;@dpuse/dpuse-shared → dist/dpuse-shared.es.js | `██░░░░░░░░░░░░░░░░░░`&nbsp;12.0%&nbsp;·&nbsp;15.2&nbsp;kB                                      |
-| &nbsp;&nbsp;&nbsp;&nbsp;src → index.ts                                | `█░░░░░░░░░░░░░░░░░░░`&nbsp;4.2%&nbsp;·&nbsp;5.3&nbsp;kB                                        |
+| &nbsp;&nbsp;&nbsp;&nbsp;src → index.ts                                | `█░░░░░░░░░░░░░░░░░░░`&nbsp;4.3%&nbsp;·&nbsp;5.4&nbsp;kB                                        |
 | &nbsp;&nbsp;&nbsp;&nbsp;(bundler output, whitespace & JSON)           | `█░░░░░░░░░░░░░░░░░░░`&nbsp;5.7%&nbsp;·&nbsp;7.3&nbsp;kB                                        |
 
 Bars show each row's share of its output file.

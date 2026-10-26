@@ -129,6 +129,13 @@ describe('Tool', () => {
             expect(result.issues[0]).toMatchObject({ fieldNumber: 2, id: 'CSV_INVALID_CLOSING_QUOTE', lineNumber: 2, value: 'y' });
         });
 
+        it('folds the quote left open by a bad closing quote into one issue covering the lines it swallowed', async () => {
+            const result = await new Tool().parseText('a,b\n1,"x" y\n2,3\n4,5\n', [','], true);
+
+            expect(result.issues).toHaveLength(1);
+            expect(result.issues[0]).toMatchObject({ endLineNumber: 4, id: 'CSV_INVALID_CLOSING_QUOTE', lineNumber: 2, recordNumber: 2, value: ' ' });
+        });
+
         it('cuts a long value short', async () => {
             const result = await new Tool().parseText(`a\n${'x'.repeat(60)}"y\n`, [',']);
 
