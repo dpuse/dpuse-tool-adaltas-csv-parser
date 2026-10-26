@@ -110,6 +110,31 @@ describe('Tool', () => {
             expect(result.issues[0]?.message).toMatch(/Quote Not Closed/);
         });
 
+        it('reports a quote never closed from the line its record starts on to where parsing gave up', async () => {
+            const result = await new Tool().parseText('a,b\n1,2\n3,"multi\nline\n4,5\n', [','], true);
+
+            expect(result.issues).toHaveLength(1);
+            expect(result.issues[0]).toMatchObject({ endLineNumber: 5, fieldNumber: 2, id: 'CSV_QUOTE_NOT_CLOSED', lineNumber: 3, recordNumber: 3 });
+        });
+
+        it('reports the value with an opening quote in it, and where it is', async () => {
+            const result = await new Tool().parseText('a,b\nx,ab"c\n1,2\n', [',']);
+
+            expect(result.issues[0]).toMatchObject({ endLineNumber: undefined, fieldNumber: 2, lineNumber: 2, recordNumber: 2, value: 'ab' });
+        });
+
+        it('reports the character found after a closing quote', async () => {
+            const result = await new Tool().parseText('a,b\n1,"x"y\n', [','], true);
+
+            expect(result.issues[0]).toMatchObject({ fieldNumber: 2, id: 'CSV_INVALID_CLOSING_QUOTE', lineNumber: 2, value: 'y' });
+        });
+
+        it('cuts a long value short', async () => {
+            const result = await new Tool().parseText(`a\n${'x'.repeat(60)}"y\n`, [',']);
+
+            expect(result.issues[0]?.value).toBe(`${'x'.repeat(50)}…`);
+        });
+
         it('notes which values were quoted', async () => {
             const result = await new Tool().parseText('"a",b\n', [',']);
 

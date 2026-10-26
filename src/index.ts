@@ -15,6 +15,8 @@ export interface ParseTextResult {
     valueDelimiterId: ValueDelimiterId | undefined; // Undefined when the text is not delimited.
 }
 
+type ParseError = Error & { code?: string; field?: unknown; index?: number; lines?: number; records?: number }; // The context csv-parse adds to an error.
+
 interface StreamRecordBuffer {
     push: (record: ParsingRecord) => void;
     flush: () => void;
@@ -68,6 +70,8 @@ const DEFAULT_OPTIONS: Options = {
 };
 
 const DEFAULT_RECORD_BUFFER_POOL_SIZE = 4;
+
+const MAX_ISSUE_VALUE_LENGTH = 50; // A value shown with an issue is cut short past this, because one never closed can run to the end of the text.
 
 const DEFAULT_RECORD_BUFFER_SIZE = 10_000;
 
@@ -315,30 +319,36 @@ function chooseFewerIssues<T extends { issues: PreviewIssue[] }>(priorParse: T |
 // A record the parser cannot read is skipped and becomes an issue, so parsing carries on and finds every one. A preview
 // cut short ends at a line break, which can fall inside a quoted value that spans lines. A quote still open at the end
 // of such a preview is therefore not an issue. In a whole file it is one. Records are taken as each is parsed, from
-// 'data' events, because those still buffered are lost when an error stops the parser.
+// 'data' events, because those still buffered are lost when an error stops the parser. Each record reports the line it
+// ends on, so an issue can say where its record starts: the parser itself only says where it found the problem, which
+// for a quote never closed is the end of the text.
 function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isComplete: boolean): Promise<{ issues: PreviewIssue[]; records: ParsingRecord[] }> {
     return new Promise((resolve) => {
         const issues: PreviewIssue[] = [];
         const records: ParsingRecord[] = [];
-        const addIssue = (error: (Error & { code?: string; lines?: number }) | undefined): void => {
+        let lastEndLineNumber = 0; // The line the last record, read or skipped, ends on.
+        const addIssue = (error: ParseError | undefined): void => {
             if (error == null || (!isComplete && error.code === 'CSV_QUOTE_NOT_CLOSED')) return;
-            issues.push({ id: error.code ?? 'CSV_UNKNOWN_ERROR', lineNumber: error.lines, message: error.message, severityId: 'error' });
+            issues.push(constructParseIssue(error, lastEndLineNumber + 1));
+            if (error.lines != null) lastEndLineNumber = error.lines;
         };
         const parser = parse({
             ...DEFAULT_OPTIONS,
             cast: (value, context): { value: string; wasValueQuoted: boolean } => ({ value, wasValueQuoted: context.quoting }),
             delimiter,
+            info: true,
             on_skip: (error): undefined => {
                 addIssue(error);
             },
             relax_column_count: true,
             skip_records_with_error: true
         });
-        parser.on('data', (record: ParsingRecord) => {
+        parser.on('data', ({ info, record }: { info: { lines: number }; record: ParsingRecord }) => {
             records.push(record);
+            lastEndLineNumber = info.lines;
         });
         // Only an error the parser cannot skip past, such as a bad option, ends here.
-        parser.on('error', (error: Error & { code?: string; lines?: number }) => {
+        parser.on('error', (error: ParseError) => {
             addIssue(error);
             resolve({ issues, records });
         });
@@ -348,6 +358,24 @@ function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isCom
         parser.write(text);
         parser.end();
     });
+}
+
+// Everything the parser says about where the problem is. It counts fields from 0 and records already read, so both are
+// moved on by one. An invalid closing quote names the character it met only in its message.
+function constructParseIssue(error: ParseError, startLineNumber: number): PreviewIssue {
+    const endLineNumber = error.lines;
+    const closingQuoteCharacter = error.code === 'CSV_INVALID_CLOSING_QUOTE' ? /got "(.*?)" at line/u.exec(error.message)?.[1] : undefined;
+    const value = typeof error.field === 'string' ? error.field : closingQuoteCharacter;
+    return {
+        endLineNumber: endLineNumber != null && endLineNumber > startLineNumber ? endLineNumber : undefined,
+        fieldNumber: error.index == null ? undefined : error.index + 1,
+        id: error.code ?? 'CSV_UNKNOWN_ERROR',
+        lineNumber: endLineNumber == null ? undefined : Math.min(startLineNumber, endLineNumber),
+        message: error.message,
+        recordNumber: error.records == null ? undefined : error.records + 1,
+        severityId: 'error',
+        value: value != null && value.length > MAX_ISSUE_VALUE_LENGTH ? `${value.slice(0, MAX_ISSUE_VALUE_LENGTH)}…` : value
+    };
 }
 
 // The average number of values per record, and how much that number changes from one record to the next.
