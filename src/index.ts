@@ -329,17 +329,8 @@ function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isCom
         let lastEndLineNumber = 0; // The line the last record, read or skipped, ends on.
         const addIssue = (error: ParseError | undefined): void => {
             if (error == null || (!isComplete && error.code === 'CSV_QUOTE_NOT_CLOSED')) return;
-            const issue = constructParseIssue(error, lastEndLineNumber + 1);
+            issues.push(constructParseIssue(error, lastEndLineNumber + 1));
             if (error.lines != null) lastEndLineNumber = error.lines;
-            // A bad closing quote leaves the parser inside the quoted value, so it reads every later line as part of it and
-            // then reports the quote as never closed, for the same record. That is the first issue's doing, so the first
-            // issue is extended to cover those lines instead of a second one being added.
-            const priorIssue = issues.at(-1);
-            if (priorIssue != null && issue.id === 'CSV_QUOTE_NOT_CLOSED' && priorIssue.recordNumber === issue.recordNumber) {
-                priorIssue.endLineNumber = issue.endLineNumber ?? issue.lineNumber;
-                return;
-            }
-            issues.push(issue);
         };
         const parser = parse({
             ...DEFAULT_OPTIONS,
