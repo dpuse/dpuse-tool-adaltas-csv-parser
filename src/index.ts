@@ -4,11 +4,12 @@ export type { Options, Parser } from 'csv-parse/browser/esm';
 
 // ── DPUse Framework
 import { buildFetchError, ignoreErrors, resolveDecoderId } from '@dpuse/dpuse-shared';
-import type { ParsingRecord, RecordDelimiterId, RecordRetrievalTypeId, RetrieveRecordsOptions, RetrieveRecordsSummary, ValueDelimiterId } from '@dpuse/dpuse-shared';
+import type { ParsingRecord, PreviewIssue, RecordDelimiterId, RecordRetrievalTypeId, RetrieveRecordsOptions, RetrieveRecordsSummary, ValueDelimiterId } from '@dpuse/dpuse-shared';
 
 // ── Types ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ParseTextResult {
+    issues: PreviewIssue[]; // Every record the parser could not read, in the order found. Empty when the text parsed cleanly.
     parsedRecords: ParsingRecord[];
     recordDelimiterId: RecordDelimiterId;
     valueDelimiterId: ValueDelimiterId | undefined; // Undefined when the text is not delimited.
@@ -183,8 +184,8 @@ export class Tool {
      */
     async parseText(text: string, delimiters: ValueDelimiterId[], isComplete = false): Promise<ParseTextResult> {
         const recordDelimiterId = determineRecordDelimiter(text);
-        const { parsedRecords, valueDelimiterId } = await determineValueDelimiter(text, delimiters, isComplete);
-        return { parsedRecords, recordDelimiterId, valueDelimiterId };
+        const { issues, parsedRecords, valueDelimiterId } = await determineValueDelimiter(text, delimiters, isComplete);
+        return { issues, parsedRecords, recordDelimiterId, valueDelimiterId };
     }
 }
 
@@ -260,21 +261,21 @@ function determineRecordDelimiter(text: string): RecordDelimiterId {
 /**
  * Determine value delimiter. Undefined when the text is not delimited: the best delimiter found does not split most
  * records into the same number of values, more than one, as a table's rows would be. The records parsed with it are
- * still returned, so the text can be shown as a table if the user chooses. Parsing is strict. A delimiter whose parse
- * fails is ruled out, because a wrong delimiter can itself cause a quote error. When every delimiter fails, the error is
- * thrown, so the user learns why the text cannot be read.
+ * still returned, so the text can be shown as a table if the user chooses. A delimiter whose parse has issues is only
+ * used when every delimiter's does, because a wrong delimiter can itself cause a quote error. Then the one with the
+ * fewest issues is used, the first on a tie, and its issues are returned, so the user learns why the text cannot be read.
  */
 async function determineValueDelimiter(
     text: string,
     delimiters: ValueDelimiterId[],
     isComplete: boolean
-): Promise<{ parsedRecords: ParsingRecord[]; valueDelimiterId: ValueDelimiterId | undefined }> {
+): Promise<{ issues: PreviewIssue[]; parsedRecords: ParsingRecord[]; valueDelimiterId: ValueDelimiterId | undefined }> {
     let valueDelimiterId: ValueDelimiterId | undefined;
     let priorAverageCount: number | undefined;
     let priorSumCountDiffs: number | undefined;
     let parsedRecords: ParsingRecord[] = [];
-    let firstError: Error | undefined;
-    let hasParsedWithoutError = false;
+    let fewestIssuesParse: { delimiter: ValueDelimiterId; issues: PreviewIssue[]; records: ParsingRecord[] } | undefined;
+    let hasParsedWithoutIssues = false;
 
     /* TODO: Could improve performance by limiting the number of delimiters
        processed by exiting if column count is the same for each line and
@@ -283,12 +284,12 @@ async function determineValueDelimiter(
        less common? */
 
     for (const delimiter of delimiters) {
-        const { error, records } = await parseTextWithDelimiter(text, delimiter, isComplete);
-        if (error != null) {
-            firstError ??= error;
+        const { issues, records } = await parseTextWithDelimiter(text, delimiter, isComplete);
+        if (issues.length > 0) {
+            fewestIssuesParse = chooseFewerIssues(fewestIssuesParse, { delimiter, issues, records });
             continue;
         }
-        hasParsedWithoutError = true;
+        hasParsedWithoutIssues = true;
         if (records.length === 0) continue; // Nothing to compare, and the average below would be 0 / 0.
         const { averageValueCount, sumOfValueCountDiffs } = measureValueCounts(records);
         const isBetterFit = (!priorSumCountDiffs || sumOfValueCountDiffs <= priorSumCountDiffs) && (!priorAverageCount || averageValueCount > priorAverageCount);
@@ -299,31 +300,50 @@ async function determineValueDelimiter(
         parsedRecords = records;
     }
 
-    if (!hasParsedWithoutError && firstError != null) throw firstError;
-    return { parsedRecords, valueDelimiterId: valueDelimiterId != null && isTabular(parsedRecords) ? valueDelimiterId : undefined };
+    if (!hasParsedWithoutIssues && fewestIssuesParse != null) {
+        const { delimiter, issues, records } = fewestIssuesParse;
+        return { issues, parsedRecords: records, valueDelimiterId: isTabular(records) ? delimiter : undefined };
+    }
+    return { issues: [], parsedRecords, valueDelimiterId: valueDelimiterId != null && isTabular(parsedRecords) ? valueDelimiterId : undefined };
 }
 
-// A preview cut short ends at a line break, which can fall inside a quoted value that spans lines. A quote still open at
-// the end of such a preview is therefore not an error, and the records before it are kept. In a whole file it is one.
-// Records are taken as each is parsed, from 'data' events, because those still buffered are lost when an error stops
-// the parser.
-function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isComplete: boolean): Promise<{ error?: Error; records: ParsingRecord[] }> {
+// The earlier parse wins a tie, so delimiters keep their order of preference.
+function chooseFewerIssues<T extends { issues: PreviewIssue[] }>(priorParse: T | undefined, parse: T): T {
+    return priorParse == null || parse.issues.length < priorParse.issues.length ? parse : priorParse;
+}
+
+// A record the parser cannot read is skipped and becomes an issue, so parsing carries on and finds every one. A preview
+// cut short ends at a line break, which can fall inside a quoted value that spans lines. A quote still open at the end
+// of such a preview is therefore not an issue. In a whole file it is one. Records are taken as each is parsed, from
+// 'data' events, because those still buffered are lost when an error stops the parser.
+function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isComplete: boolean): Promise<{ issues: PreviewIssue[]; records: ParsingRecord[] }> {
     return new Promise((resolve) => {
+        const issues: PreviewIssue[] = [];
         const records: ParsingRecord[] = [];
+        const addIssue = (error: (Error & { code?: string; lines?: number }) | undefined): void => {
+            if (error == null || (!isComplete && error.code === 'CSV_QUOTE_NOT_CLOSED')) return;
+            issues.push({ id: error.code ?? 'CSV_UNKNOWN_ERROR', lineNumber: error.lines, message: error.message, severityId: 'error' });
+        };
         const parser = parse({
             ...DEFAULT_OPTIONS,
             cast: (value, context): { value: string; wasValueQuoted: boolean } => ({ value, wasValueQuoted: context.quoting }),
             delimiter,
-            relax_column_count: true
+            on_skip: (error): undefined => {
+                addIssue(error);
+            },
+            relax_column_count: true,
+            skip_records_with_error: true
         });
         parser.on('data', (record: ParsingRecord) => {
             records.push(record);
         });
-        parser.on('error', (error: Error & { code?: string }) => {
-            resolve(!isComplete && error.code === 'CSV_QUOTE_NOT_CLOSED' ? { records } : { error, records });
+        // Only an error the parser cannot skip past, such as a bad option, ends here.
+        parser.on('error', (error: Error & { code?: string; lines?: number }) => {
+            addIssue(error);
+            resolve({ issues, records });
         });
         parser.on('end', () => {
-            resolve({ records });
+            resolve({ issues, records });
         });
         parser.write(text);
         parser.end();

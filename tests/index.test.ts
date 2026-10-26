@@ -56,8 +56,29 @@ describe('Tool', () => {
             expect(readValues(result.parsedRecords)).toEqual([['Ada'], ['Grace']]);
         });
 
-        it('reports a quote error that every delimiter meets', async () => {
-            await expect(new Tool().parseText('a,b\nab"c,1\n', [',', ';'])).rejects.toThrow(/Invalid Opening Quote.*line 2/);
+        it('reports a quote error that every delimiter meets as an issue, keeping the records it could read', async () => {
+            const result = await new Tool().parseText('a,b\nab"c,1\n', [',', ';']);
+
+            expect(result.issues).toHaveLength(1);
+            expect(result.issues[0]).toMatchObject({ id: 'INVALID_OPENING_QUOTE', lineNumber: 2, severityId: 'error' });
+            expect(result.issues[0]?.message).toMatch(/Invalid Opening Quote/);
+            expect(readValues(result.parsedRecords)).toEqual([['a', 'b']]);
+        });
+
+        it('reports every record it cannot read, not just the first', async () => {
+            const result = await new Tool().parseText('a,b\nab"c,1\nx,y\nd"e,2\n', [',']);
+
+            expect(result.issues.map((issue) => issue.lineNumber)).toEqual([2, 4]);
+            expect(readValues(result.parsedRecords)).toEqual([
+                ['a', 'b'],
+                ['x', 'y']
+            ]);
+        });
+
+        it('reports no issues for text that parses cleanly', async () => {
+            const result = await new Tool().parseText('name;age\nAda;36\n', [',', ';']);
+
+            expect(result.issues).toEqual([]);
         });
 
         it('rules out a delimiter whose parse fails', async () => {
@@ -73,6 +94,7 @@ describe('Tool', () => {
         it('keeps the records before a quoted value cut off at the end of the preview', async () => {
             const result = await new Tool().parseText('a,b\n1,2\n3,"multi\nline', [',']);
 
+            expect(result.issues).toEqual([]);
             expect(result.valueDelimiterId).toBe(',');
             expect(readValues(result.parsedRecords)).toEqual([
                 ['a', 'b'],
@@ -81,7 +103,11 @@ describe('Tool', () => {
         });
 
         it('reports a quote still open at the end of a whole file', async () => {
-            await expect(new Tool().parseText('a,b\n1,2\n3,"never closed\n', [','], true)).rejects.toThrow(/Quote Not Closed/);
+            const result = await new Tool().parseText('a,b\n1,2\n3,"never closed\n', [','], true);
+
+            expect(result.issues).toHaveLength(1);
+            expect(result.issues[0]).toMatchObject({ id: 'CSV_QUOTE_NOT_CLOSED', lineNumber: 3, severityId: 'error' });
+            expect(result.issues[0]?.message).toMatch(/Quote Not Closed/);
         });
 
         it('notes which values were quoted', async () => {
