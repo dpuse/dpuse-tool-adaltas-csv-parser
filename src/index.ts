@@ -3,17 +3,20 @@ import { type Options, parse, type Parser } from 'csv-parse/browser/esm';
 export type { Options, Parser } from 'csv-parse/browser/esm';
 
 // ── DPUse Framework
-import { buildFetchError, ignoreErrors, resolveDecoderId } from '@dpuse/dpuse-shared';
-import type { ParsingRecord, PreviewIssue, RecordDelimiterId, RecordRetrievalTypeId, RetrieveRecordsOptions, RetrieveRecordsSummary, ValueDelimiterId } from '@dpuse/dpuse-shared';
+import { ignoreErrors, parseDelimitedText, resolveDecoderId } from '@dpuse/dpuse-shared';
+import type {
+    ParserInterface,
+    ParseStreamOptions,
+    ParseTextOptions,
+    ParseTextResult,
+    ParsingRecord,
+    PreviewIssue,
+    RecordRetrievalTypeId,
+    RetrieveRecordsSummary,
+    ValueDelimiterId
+} from '@dpuse/dpuse-shared';
 
 // ── Types ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-export interface ParseTextResult {
-    issues: PreviewIssue[]; // Every record the parser could not read, in the order found. Empty when the text parsed cleanly.
-    parsedRecords: ParsingRecord[];
-    recordDelimiterId: RecordDelimiterId;
-    valueDelimiterId: ValueDelimiterId | undefined; // Undefined when the text is not delimited.
-}
 
 type ParseError = Error & { code?: string; field?: unknown; index?: number; lines?: number; records?: number }; // The context csv-parse adds to an error.
 
@@ -77,18 +80,14 @@ const DEFAULT_RECORD_BUFFER_SIZE = 10_000;
 
 // ── Tools ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export class Tool {
+export class Tool implements ParserInterface {
     /**
-     * Parse stream.
+     * Parse stream. Reads delimited text from the stream. The caller owns the stream and its fetch, so a failed fetch is
+     * the caller's to report. Aborting the signal stops the read and rejects with the signal's reason.
      */
-    // TODO: An empty file fails here with '"listener" argument must be a function' rather than giving no rows. Seen in
-    // a script reading 'Type Samples/people/people-empty.csv', not yet in the app, which has no full read until the
-    // audit step is built. Reproduce it in this tool's tests first, then make an empty file give zero rows.
     async parseStream(
-        retrieveRecordsOptions: RetrieveRecordsOptions,
-        parseOptions: Options,
-        url: string,
-        abortController: AbortController,
+        stream: ReadableStream<Uint8Array>,
+        options: ParseStreamOptions,
         chunk: (typeId: RecordRetrievalTypeId, records: ParsingRecord[]) => void
     ): Promise<RetrieveRecordsSummary> {
         return new Promise<RetrieveRecordsSummary>((resolve, reject) => {
@@ -113,31 +112,39 @@ export class Tool {
                 reader = undefined;
             };
 
-            abortController.signal.addEventListener('abort', stopProcessing, { once: true });
-
             const handleError = (error: unknown): void => {
                 if (hasErrored) return;
 
                 hasErrored = true;
                 stopProcessing();
-                if (!abortController.signal.aborted) abortController.abort(error);
                 reject(error instanceof Error ? error : new Error(String(error)));
             };
 
+            // The stream may not be tied to the signal, so an abort is acted on here rather than left to make a read fail.
+            options.abortSignal.addEventListener(
+                'abort',
+                () => {
+                    handleError(options.abortSignal.reason);
+                },
+                { once: true }
+            );
+
             const run = async (): Promise<void> => {
+                options.abortSignal.throwIfAborted();
                 parser = parse({
                     ...DEFAULT_OPTIONS,
-                    ...parseOptions,
-                    cast: (value, context): { value: string; wasValueQuoted: boolean } => ({ value, wasValueQuoted: context.quoting })
+                    cast: (value, context): { value: string; valueWasQuoted: boolean } => ({ value, valueWasQuoted: context.quoting }),
+                    delimiter: options.valueDelimiterId,
+                    relax_column_count: true
                 });
-                recordBuffer = constructRecordBuffer({ chunk, chunkSize: retrieveRecordsOptions.chunkSize ?? DEFAULT_RECORD_BUFFER_SIZE });
+                recordBuffer = constructRecordBuffer({ chunk, chunkSize: options.chunkSize ?? DEFAULT_RECORD_BUFFER_SIZE });
                 parser.on('readable', () => {
                     try {
                         if (parser == null || recordBuffer == null) return;
                         let record: ParsingRecord | null;
                         while ((record = parser.read() as ParsingRecord | null) != null) {
                             if (hasErrored) return;
-                            abortController.signal.throwIfAborted();
+                            options.abortSignal.throwIfAborted();
                             recordBuffer.push(record);
                         }
                     } catch (error) {
@@ -153,26 +160,39 @@ export class Tool {
                     resolve(constructSummary(parser));
                 });
 
-                const response = await fetch(encodeURI(url), { signal: abortController.signal });
-                if (!response.ok || response.body == null) {
-                    throw await buildFetchError(response, `Failed to fetch '${url}' file.`, 'dpuse-connector-file-store-emulator|Connector|retrieve');
-                }
-
-                reader = response.body.getReader();
-                const decoder = new TextDecoder(resolveDecoderId(retrieveRecordsOptions.encodingId));
+                reader = stream.getReader();
+                const decoder = new TextDecoder(resolveDecoderId(options.encodingId));
+                let byteCount = 0;
+                let hasWrittenText = false;
                 let result = await reader.read();
                 while (!result.done) {
                     if (hasErrored) return;
-                    abortController.signal.throwIfAborted();
+                    options.abortSignal.throwIfAborted();
+                    byteCount += result.value.length;
                     const decodedChunk = decoder.decode(result.value, { stream: true });
-                    if (decodedChunk.length > 0) parser.write(decodedChunk);
+                    if (decodedChunk.length > 0) {
+                        parser.write(decodedChunk);
+                        hasWrittenText = true;
+                    }
                     result = await reader.read();
                 }
 
                 if (hasErrored) return;
 
                 const finalChunk = decoder.decode();
-                if (finalChunk.length > 0) parser.write(finalChunk);
+                if (finalChunk.length > 0) {
+                    parser.write(finalChunk);
+                    hasWrittenText = true;
+                }
+
+                // 'csv-parse' fails when it is ended with nothing written, with '"listener" argument must be a function'. A
+                // stream with no text is summarised here instead, and its parser is dropped without being ended.
+                if (!hasWrittenText) {
+                    parser.removeAllListeners();
+                    parser = undefined;
+                    resolve({ byteCount, commentLineCount: 0, emptyLineCount: 0, lineCount: 0, nonUniformRecordCount: 0, recordCount: 0 });
+                    return;
+                }
                 parser.end();
             };
 
@@ -184,12 +204,10 @@ export class Tool {
 
     /**
      * Parse text. 'isComplete' says whether the text is the whole file rather than a preview of its start, so a quote
-     * still open at its end is an error rather than a value the preview cut off. Not complete by default.
+     * still open at its end is an error rather than a value the preview cut off.
      */
-    async parseText(text: string, delimiters: ValueDelimiterId[], isComplete = false): Promise<ParseTextResult> {
-        const recordDelimiterId = determineRecordDelimiter(text);
-        const { issues, parsedRecords, valueDelimiterId } = await determineValueDelimiter(text, delimiters, isComplete);
-        return { issues, parsedRecords, recordDelimiterId, valueDelimiterId };
+    async parseText(text: string, options: ParseTextOptions): Promise<ParseTextResult> {
+        return await parseDelimitedText(text, options, parseTextWithDelimiter); // The choice of delimiter is shared, so every parser makes it the same way.
     }
 }
 
@@ -250,72 +268,6 @@ function constructSummary(parser: Parser | undefined): RetrieveRecordsSummary {
 
 //#region: Parse text helpers.
 
-/**
- * Determine record delimiter.
- */
-function determineRecordDelimiter(text: string): RecordDelimiterId {
-    const countCRLF = (text.match(/\r\n/g) ?? []).length; // Count all '\r\n'character sequences.
-    const countLF = (text.match(/(?<!\r)\n/g) ?? []).length; // Count all '\n' characters not preceded by '\r' character.
-    const countCR = (text.match(/\r(?!\n)/g) ?? []).length; // Count all '\r' characters not followed by '\n' character.
-    if (countCRLF >= countLF && countCRLF >= countCR) return '\r\n';
-    if (countLF >= countCRLF && countLF >= countCR) return '\n';
-    return countCR >= countCRLF && countCR >= countLF ? '\r' : '\n'; // Ties, including text with no line break, go to '\r\n' above, so the '\n' here is never reached.
-}
-
-/**
- * Determine value delimiter. Undefined when the text is not delimited: the best delimiter found does not split most
- * records into the same number of values, more than one, as a table's rows would be. The records parsed with it are
- * still returned, so the text can be shown as a table if the user chooses. A delimiter whose parse has issues is only
- * used when every delimiter's does, because a wrong delimiter can itself cause a quote error. Then the one with the
- * fewest issues is used, the first on a tie, and its issues are returned, so the user learns why the text cannot be read.
- */
-async function determineValueDelimiter(
-    text: string,
-    delimiters: ValueDelimiterId[],
-    isComplete: boolean
-): Promise<{ issues: PreviewIssue[]; parsedRecords: ParsingRecord[]; valueDelimiterId: ValueDelimiterId | undefined }> {
-    let valueDelimiterId: ValueDelimiterId | undefined;
-    let priorAverageCount: number | undefined;
-    let priorSumCountDiffs: number | undefined;
-    let parsedRecords: ParsingRecord[] = [];
-    let fewestIssuesParse: { delimiter: ValueDelimiterId; issues: PreviewIssue[]; records: ParsingRecord[] } | undefined;
-    let hasParsedWithoutIssues = false;
-
-    /* TODO: Could improve performance by limiting the number of delimiters
-       processed by exiting if column count is the same for each line and
-       by ordering delimiters in most common usage. Could also consider
-       parallel parsing. Maybe group by most common delimiters and then by
-       less common? */
-
-    for (const delimiter of delimiters) {
-        const { issues, records } = await parseTextWithDelimiter(text, delimiter, isComplete);
-        if (issues.length > 0) {
-            fewestIssuesParse = chooseFewerIssues(fewestIssuesParse, { delimiter, issues, records });
-            continue;
-        }
-        hasParsedWithoutIssues = true;
-        if (records.length === 0) continue; // Nothing to compare, and the average below would be 0 / 0.
-        const { averageValueCount, sumOfValueCountDiffs } = measureValueCounts(records);
-        const isBetterFit = (!priorSumCountDiffs || sumOfValueCountDiffs <= priorSumCountDiffs) && (!priorAverageCount || averageValueCount > priorAverageCount);
-        if (!isBetterFit) continue;
-        valueDelimiterId = delimiter;
-        priorAverageCount = averageValueCount;
-        priorSumCountDiffs = sumOfValueCountDiffs;
-        parsedRecords = records;
-    }
-
-    if (!hasParsedWithoutIssues && fewestIssuesParse != null) {
-        const { delimiter, issues, records } = fewestIssuesParse;
-        return { issues, parsedRecords: records, valueDelimiterId: isTabular(records) ? delimiter : undefined };
-    }
-    return { issues: [], parsedRecords, valueDelimiterId: valueDelimiterId != null && isTabular(parsedRecords) ? valueDelimiterId : undefined };
-}
-
-// The earlier parse wins a tie, so delimiters keep their order of preference.
-function chooseFewerIssues<T extends { issues: PreviewIssue[] }>(priorParse: T | undefined, parse: T): T {
-    return priorParse == null || parse.issues.length < priorParse.issues.length ? parse : priorParse;
-}
-
 // A record the parser cannot read is skipped and becomes an issue, so parsing carries on and finds every one. A preview
 // cut short ends at a line break, which can fall inside a quoted value that spans lines. A quote still open at the end
 // of such a preview is therefore not an issue. In a whole file it is one. Records are taken as each is parsed, from
@@ -334,7 +286,7 @@ function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isCom
         };
         const parser = parse({
             ...DEFAULT_OPTIONS,
-            cast: (value, context): { value: string; wasValueQuoted: boolean } => ({ value, wasValueQuoted: context.quoting }),
+            cast: (value, context): { value: string; valueWasQuoted: boolean } => ({ value, valueWasQuoted: context.quoting }),
             delimiter,
             info: true,
             on_skip: (error): undefined => {
@@ -376,25 +328,4 @@ function constructParseIssue(error: ParseError, startLineNumber: number): Previe
         severityId: 'error',
         value: value != null && value.length > MAX_ISSUE_VALUE_LENGTH ? `${value.slice(0, MAX_ISSUE_VALUE_LENGTH)}…` : value
     };
-}
-
-// The average number of values per record, and how much that number changes from one record to the next.
-function measureValueCounts(records: ParsingRecord[]): { averageValueCount: number; sumOfValueCountDiffs: number } {
-    let totalValueCount = 0;
-    let sumOfValueCountDiffs = 0;
-    let priorValueCount: number | undefined;
-    for (const record of records) {
-        if (priorValueCount != null) sumOfValueCountDiffs += Math.abs(record.length - priorValueCount);
-        priorValueCount = record.length;
-        totalValueCount += record.length;
-    }
-    return { averageValueCount: totalValueCount / records.length, sumOfValueCountDiffs };
-}
-
-// Most records have the same number of values, more than one. Ragged rows are allowed, as the parser allows them.
-function isTabular(parsedRecords: ParsingRecord[]): boolean {
-    const recordCountByValueCount = new Map<number, number>();
-    for (const record of parsedRecords) recordCountByValueCount.set(record.length, (recordCountByValueCount.get(record.length) ?? 0) + 1);
-    const [commonValueCount = 0, commonRecordCount = 0] = [...recordCountByValueCount].toSorted((left, right) => right[1] - left[1])[0] ?? [];
-    return commonValueCount > 1 && commonRecordCount * 2 > parsedRecords.length;
 }

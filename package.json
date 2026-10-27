@@ -1,6 +1,6 @@
 {
     "name": "@dpuse/dpuse-tool-adaltas-csv-parser",
-    "version": "1.0.119",
+    "version": "1.0.120",
     "private": false,
     "description": "...",
     "license": "MIT",
@@ -61,11 +61,11 @@
         "test": "node -e \"import('@dpuse/dpuse-development').then(m => m.testProject())\""
     },
     "dependencies": {
-        "@dpuse/dpuse-shared": "^1.0.146",
+        "@dpuse/dpuse-shared": "^1.0.152",
         "csv-parse": "^7.0.3"
     },
     "devDependencies": {
-        "@dpuse/dpuse-development": "^1.0.133",
+        "@dpuse/dpuse-development": "^1.0.135",
         "@dpuse/eslint-config-dpuse": "^1.0.145",
         "@types/node": "^26.6.5",
         "@vitest/coverage-v8": "^5.0.5",
