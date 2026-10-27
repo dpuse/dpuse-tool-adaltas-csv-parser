@@ -21,8 +21,9 @@ import type {
 type ParseError = Error & { code?: string; field?: unknown; index?: number; lines?: number; records?: number }; // The context csv-parse adds to an error.
 
 interface StreamRecordBuffer {
-    push: (record: ParsingRecord) => void;
+    drain: () => Promise<void>; // Settles once the receiver has finished with every chunk handed to it so far.
     flush: () => void;
+    push: (record: ParsingRecord) => void;
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -88,7 +89,7 @@ export class Tool implements ParserInterface {
     async parseStream(
         stream: ReadableStream<Uint8Array>,
         options: ParseStreamOptions,
-        chunk: (typeId: RecordRetrievalTypeId, records: ParsingRecord[]) => void
+        chunk: (typeId: RecordRetrievalTypeId, records: ParsingRecord[]) => void | Promise<void>
     ): Promise<RetrieveRecordsSummary> {
         return new Promise<RetrieveRecordsSummary>((resolve, reject) => {
             let parser: Parser | undefined;
@@ -137,7 +138,8 @@ export class Tool implements ParserInterface {
                     delimiter: options.valueDelimiterId,
                     relax_column_count: true
                 });
-                recordBuffer = constructRecordBuffer({ chunk, chunkSize: options.chunkSize ?? DEFAULT_RECORD_BUFFER_SIZE });
+                const activeRecordBuffer = constructRecordBuffer({ chunk, chunkSize: options.chunkSize ?? DEFAULT_RECORD_BUFFER_SIZE });
+                recordBuffer = activeRecordBuffer;
                 parser.on('readable', () => {
                     try {
                         if (parser == null || recordBuffer == null) return;
@@ -154,10 +156,19 @@ export class Tool implements ParserInterface {
                 parser.on('error', (error) => {
                     handleError(error);
                 });
+                // Finished only once the receiver has finished with the last records too.
+                const resolveOnceDrained = async (summary: RetrieveRecordsSummary): Promise<void> => {
+                    try {
+                        await activeRecordBuffer.drain();
+                        resolve(summary);
+                    } catch (error) {
+                        handleError(error);
+                    }
+                };
                 parser.on('end', () => {
                     if (hasErrored) return;
-                    recordBuffer?.flush();
-                    resolve(constructSummary(parser));
+                    activeRecordBuffer.flush();
+                    void resolveOnceDrained(constructSummary(parser));
                 });
 
                 reader = stream.getReader();
@@ -174,6 +185,7 @@ export class Tool implements ParserInterface {
                         parser.write(decodedChunk);
                         hasWrittenText = true;
                     }
+                    await activeRecordBuffer.drain(); // A receiver that is slower than the parser holds the read back.
                     result = await reader.read();
                 }
 
@@ -218,9 +230,10 @@ export class Tool implements ParserInterface {
 /**
  * Construct record buffer.
  */
-function constructRecordBuffer(bufferOptions: { chunk: (typeId: RecordRetrievalTypeId, records: ParsingRecord[]) => void; chunkSize: number }): StreamRecordBuffer {
+function constructRecordBuffer(bufferOptions: { chunk: (typeId: RecordRetrievalTypeId, records: ParsingRecord[]) => void | Promise<void>; chunkSize: number }): StreamRecordBuffer {
     const recordsPerChunk = Math.max(1, Math.floor(bufferOptions.chunkSize));
     const pool: ParsingRecord[][] = [];
+    const pendingReceipts: Promise<void>[] = []; // The receiver's promises for chunks it is still working on.
     let records = allocateBuffer();
     let recordCount = 0;
 
@@ -230,8 +243,16 @@ function constructRecordBuffer(bufferOptions: { chunk: (typeId: RecordRetrievalT
         recordsToEmit.length = recordCount; // Trim before handing off so consumers only see populated entries.
         records = allocateBuffer();
         recordCount = 0;
-        bufferOptions.chunk('parsingRecordArray', recordsToEmit);
+        const receipt = bufferOptions.chunk('parsingRecordArray', recordsToEmit);
+        if (receipt instanceof Promise) {
+            pendingReceipts.push(receipt); // The receiver may still be reading the array, so it is not reused.
+            return;
+        }
         if (pool.length < DEFAULT_RECORD_BUFFER_POOL_SIZE) pool.push(recordsToEmit);
+    };
+
+    const drain = async (): Promise<void> => {
+        while (pendingReceipts.length > 0) await Promise.all(pendingReceipts.splice(0));
     };
 
     const push = (record: ParsingRecord): void => {
@@ -239,7 +260,7 @@ function constructRecordBuffer(bufferOptions: { chunk: (typeId: RecordRetrievalT
         if (recordCount >= recordsPerChunk) flush();
     };
 
-    return { flush, push };
+    return { drain, flush, push };
 
     function allocateBuffer(): ParsingRecord[] {
         const pooled = pool.pop();

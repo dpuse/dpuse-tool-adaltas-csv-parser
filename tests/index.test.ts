@@ -234,6 +234,38 @@ describe('Tool', () => {
             expect(summary).toMatchObject({ nonUniformRecordCount: 1, recordCount: 3 });
         });
 
+        it("does not finish until the receiver's promise for the last records has settled", async () => {
+            const { promise: receipt, resolve: settleReceipt } = Promise.withResolvers<undefined>();
+            let isFinished = false;
+            const parseAll = async (): Promise<void> => {
+                await new Tool().parseStream(streamOf('a,b\n1,2\n'), buildStreamOptions(), () => receipt);
+                isFinished = true;
+            };
+
+            const parsing = parseAll();
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            expect(isFinished).toBe(false);
+
+            settleReceipt(undefined);
+            await parsing;
+            expect(isFinished).toBe(true);
+        });
+
+        it("rejects when the receiver's promise rejects", async () => {
+            await expect(new Tool().parseStream(streamOf('a,b\n'), buildStreamOptions(), () => Promise.reject(new Error('Not stored.')))).rejects.toThrow('Not stored.');
+        });
+
+        it('does not reuse an array its receiver is still working on', async () => {
+            const chunks: unknown[][][] = [];
+
+            await new Tool().parseStream(streamOf('a\nb\nc\nd\ne\n'), buildStreamOptions({ chunkSize: 1 }), async (_typeId, records) => {
+                chunks.push(records);
+                await Promise.resolve();
+            });
+
+            expect(chunks.map((records) => readValues(records))).toEqual([[['a']], [['b']], [['c']], [['d']], [['e']]]);
+        });
+
         it('reads an empty stream as no records', async () => {
             const chunk = vi.fn();
 
