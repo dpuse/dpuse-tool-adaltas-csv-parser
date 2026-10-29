@@ -188,6 +188,18 @@ describe('Tool', () => {
             expect(summary).toEqual({ byteCount: 16, commentLineCount: 0, emptyLineCount: 1, lineCount: 5, nonUniformRecordCount: 0, recordCount: 4 });
         });
 
+        it('waits for the parser to take more text when one chunk overfills it, then reads every record', async () => {
+            const recordCount = 50_000; // About 0.5 MB in one chunk, far past the parser's 16 KB buffer, so writing it returns false.
+            let receivedRecordCount = 0;
+
+            const summary = await new Tool().parseStream(streamOf('1,2\n'.repeat(recordCount)), buildStreamOptions(), (_typeId, records) => {
+                receivedRecordCount += records.length;
+            });
+
+            expect(receivedRecordCount).toBe(recordCount);
+            expect(summary.recordCount).toBe(recordCount);
+        });
+
         it('splits values with the delimiter it is given', async () => {
             const chunks: unknown[][][] = [];
 

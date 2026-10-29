@@ -182,8 +182,8 @@ export class Tool implements ParserInterface {
                     byteCount += result.value.length;
                     const decodedChunk = decoder.decode(result.value, { stream: true });
                     if (decodedChunk.length > 0) {
-                        parser.write(decodedChunk);
                         hasWrittenText = true;
+                        if (!parser.write(decodedChunk)) await waitForDrain(parser); // The parser's buffer is full, so the read waits until it empties.
                     }
                     await activeRecordBuffer.drain(); // A receiver that is slower than the parser holds the read back.
                     result = await reader.read();
@@ -226,6 +226,16 @@ export class Tool implements ParserInterface {
 // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 //#region: Parse stream helpers.
+
+// Settles when the parser asks for more text. A parser that is stopped meanwhile drops its listeners, so the wait is
+// then left unsettled along with the rest of the read.
+function waitForDrain(parser: Parser): Promise<void> {
+    return new Promise((resolve) => {
+        parser.once('drain', () => {
+            resolve();
+        });
+    });
+}
 
 /**
  * Construct record buffer.
