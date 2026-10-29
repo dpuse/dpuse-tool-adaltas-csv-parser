@@ -200,6 +200,17 @@ describe('Tool', () => {
             expect(summary.recordCount).toBe(recordCount);
         });
 
+        it('reads a piece larger than a slice, with a character split between slices', async () => {
+            const value = 'é'.repeat(300_000); // 600,000 bytes, so a slice of 1,048,576 bytes ends inside the second record's 'é'.
+            let values: string[][] = [];
+
+            await new Tool().parseStream(streamOf(`${value}\n${value}\n${value}\n`), buildStreamOptions(), (_typeId, records) => {
+                values = [...values, ...readValues(records)];
+            });
+
+            expect(values).toEqual([[value], [value], [value]]);
+        });
+
         it('splits values with the delimiter it is given', async () => {
             const chunks: unknown[][][] = [];
 

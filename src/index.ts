@@ -75,6 +75,10 @@ const DEFAULT_OPTIONS: Options = {
 
 const DEFAULT_RECORD_BUFFER_POOL_SIZE = 4;
 
+// WebKit hands over a file stream in pieces of about 18 MB, against about 2 MB in Chromium. Parsing a piece that large at
+// once took the tab past 5 GB in WebKit, so each piece is parsed in slices of this size. A slice is a view, not a copy.
+const MAX_SLICE_BYTE_COUNT = 1_048_576;
+
 const MAX_ISSUE_VALUE_LENGTH = 50; // A value shown with an issue is cut short past this, because one never closed can run to the end of the text.
 
 const DEFAULT_RECORD_BUFFER_SIZE = 10_000;
@@ -180,12 +184,7 @@ export class Tool implements ParserInterface {
                     if (hasErrored) return;
                     options.abortSignal.throwIfAborted();
                     byteCount += result.value.length;
-                    const decodedChunk = decoder.decode(result.value, { stream: true });
-                    if (decodedChunk.length > 0) {
-                        hasWrittenText = true;
-                        if (!parser.write(decodedChunk)) await waitForDrain(parser); // The parser's buffer is full, so the read waits until it empties.
-                    }
-                    await activeRecordBuffer.drain(); // A receiver that is slower than the parser holds the read back.
+                    if ((await writeInSlices(parser, decoder, result.value, activeRecordBuffer)) > 0) hasWrittenText = true;
                     result = await reader.read();
                 }
 
@@ -226,6 +225,20 @@ export class Tool implements ParserInterface {
 // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 //#region: Parse stream helpers.
+
+// Decodes the bytes and writes them to the parser one slice at a time. Returns the number of characters written.
+async function writeInSlices(parser: Parser, decoder: TextDecoder, bytes: Uint8Array, recordBuffer: StreamRecordBuffer): Promise<number> {
+    let writtenLength = 0;
+    for (let sliceStart = 0; sliceStart < bytes.length; sliceStart += MAX_SLICE_BYTE_COUNT) {
+        const decodedSlice = decoder.decode(bytes.subarray(sliceStart, sliceStart + MAX_SLICE_BYTE_COUNT), { stream: true });
+        if (decodedSlice.length > 0) {
+            writtenLength += decodedSlice.length;
+            if (!parser.write(decodedSlice)) await waitForDrain(parser); // The parser's buffer is full, so the read waits until it empties.
+        }
+        await recordBuffer.drain(); // A receiver that is slower than the parser holds the read back.
+    }
+    return writtenLength;
+}
 
 // Settles when the parser asks for more text. A parser that is stopped meanwhile drops its listeners, so the wait is
 // then left unsettled along with the rest of the read.
