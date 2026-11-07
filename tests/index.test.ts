@@ -41,6 +41,17 @@ describe('Tool', () => {
             ]);
         });
 
+        // The record separator's id is the text '0x1E', so the parser must be given the character itself.
+        it('splits values on the record separator character', async () => {
+            const result = await parseText('name\u{1E}age\nAda\u{1E}36\n', ['0x1E']);
+
+            expect(result.valueDelimiterId).toBe('0x1E');
+            expect(readValues(result.parsedRecords)).toEqual([
+                ['name', 'age'],
+                ['Ada', '36']
+            ]);
+        });
+
         it.each([
             ['prose with commas in some lines', 'The quick brown fox.\nIt jumped, then ran, then hid.\nThe end.\nNothing more to say, really.\n'],
             ['a single column of values', 'Ada\nGrace\nKatherine\n'],

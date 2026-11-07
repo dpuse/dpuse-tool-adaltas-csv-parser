@@ -3,16 +3,16 @@ import { type Options, parse, type Parser } from 'csv-parse/browser/esm';
 export type { Options, Parser } from 'csv-parse/browser/esm';
 
 // ── DPUse Framework
-import { ignoreErrors, parseDelimitedText, resolveDecoderId } from '@dpuse/dpuse-shared';
+import { getValueDelimiterCharacter, ignoreErrors, parseDelimitedText, resolveDecoderId } from '@dpuse/dpuse-shared';
 import type {
+    ParsedRecord,
     ParserInterface,
     ParseStreamOptions,
     ParseTextOptions,
     ParseTextResult,
-    ParsingRecord,
-    PreviewIssue,
     RecordRetrievalTypeId,
     RetrieveRecordsSummary,
+    SampleIssue,
     ValueDelimiterId
 } from '@dpuse/dpuse-shared';
 
@@ -23,7 +23,7 @@ type ParseError = Error & { code?: string; field?: unknown; index?: number; line
 interface StreamRecordBuffer {
     drain: () => Promise<void>; // Settles once the receiver has finished with every chunk handed to it so far.
     flush: () => void;
-    push: (record: ParsingRecord) => void;
+    push: (record: ParsedRecord) => void;
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -93,7 +93,7 @@ export class Tool implements ParserInterface {
     async parseStream(
         stream: ReadableStream<Uint8Array>,
         options: ParseStreamOptions,
-        chunk: (typeId: RecordRetrievalTypeId, records: ParsingRecord[]) => void | Promise<void>
+        chunk: (typeId: RecordRetrievalTypeId, records: ParsedRecord[]) => void | Promise<void>
     ): Promise<RetrieveRecordsSummary> {
         return new Promise<RetrieveRecordsSummary>((resolve, reject) => {
             let parser: Parser | undefined;
@@ -139,7 +139,7 @@ export class Tool implements ParserInterface {
                 parser = parse({
                     ...DEFAULT_OPTIONS,
                     cast: (value, context): { value: string; valueWasQuoted: boolean } => ({ value, valueWasQuoted: context.quoting }),
-                    delimiter: options.valueDelimiterId,
+                    delimiter: getValueDelimiterCharacter(options.valueDelimiterId),
                     relax_column_count: true
                 });
                 const activeRecordBuffer = constructRecordBuffer({ chunk, chunkSize: options.chunkSize ?? DEFAULT_RECORD_BUFFER_SIZE });
@@ -147,8 +147,8 @@ export class Tool implements ParserInterface {
                 parser.on('readable', () => {
                     try {
                         if (parser == null || recordBuffer == null) return;
-                        let record: ParsingRecord | null;
-                        while ((record = parser.read() as ParsingRecord | null) != null) {
+                        let record: ParsedRecord | null;
+                        while ((record = parser.read() as ParsedRecord | null) != null) {
                             if (hasErrored) return;
                             options.abortSignal.throwIfAborted();
                             recordBuffer.push(record);
@@ -253,9 +253,9 @@ function waitForDrain(parser: Parser): Promise<void> {
 /**
  * Construct record buffer.
  */
-function constructRecordBuffer(bufferOptions: { chunk: (typeId: RecordRetrievalTypeId, records: ParsingRecord[]) => void | Promise<void>; chunkSize: number }): StreamRecordBuffer {
+function constructRecordBuffer(bufferOptions: { chunk: (typeId: RecordRetrievalTypeId, records: ParsedRecord[]) => void | Promise<void>; chunkSize: number }): StreamRecordBuffer {
     const recordsPerChunk = Math.max(1, Math.floor(bufferOptions.chunkSize));
-    const pool: ParsingRecord[][] = [];
+    const pool: ParsedRecord[][] = [];
     const pendingReceipts: Promise<void>[] = []; // The receiver's promises for chunks it is still working on.
     let records = allocateBuffer();
     let recordCount = 0;
@@ -278,21 +278,21 @@ function constructRecordBuffer(bufferOptions: { chunk: (typeId: RecordRetrievalT
         while (pendingReceipts.length > 0) await Promise.all(pendingReceipts.splice(0));
     };
 
-    const push = (record: ParsingRecord): void => {
+    const push = (record: ParsedRecord): void => {
         records[recordCount++] = record;
         if (recordCount >= recordsPerChunk) flush();
     };
 
     return { drain, flush, push };
 
-    function allocateBuffer(): ParsingRecord[] {
+    function allocateBuffer(): ParsedRecord[] {
         const pooled = pool.pop();
         if (pooled != null) {
             pooled.length = 0;
             return pooled;
         }
 
-        const allocated = Array.from<ParsingRecord>({ length: recordsPerChunk });
+        const allocated = Array.from<ParsedRecord>({ length: recordsPerChunk });
         allocated.length = 0;
         return allocated;
     }
@@ -318,10 +318,10 @@ function constructSummary(parser: Parser | undefined): RetrieveRecordsSummary {
 // 'data' events, because those still buffered are lost when an error stops the parser. Each record reports the line it
 // ends on, so an issue can say where its record starts: the parser itself only says where it found the problem, which
 // for a quote never closed is the end of the text.
-function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isComplete: boolean): Promise<{ issues: PreviewIssue[]; records: ParsingRecord[] }> {
+function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isComplete: boolean): Promise<{ issues: SampleIssue[]; records: ParsedRecord[] }> {
     return new Promise((resolve) => {
-        const issues: PreviewIssue[] = [];
-        const records: ParsingRecord[] = [];
+        const issues: SampleIssue[] = [];
+        const records: ParsedRecord[] = [];
         let lastEndLineNumber = 0; // The line the last record, read or skipped, ends on.
         const addIssue = (error: ParseError | undefined): void => {
             if (error == null || (!isComplete && error.code === 'CSV_QUOTE_NOT_CLOSED')) return;
@@ -331,7 +331,7 @@ function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isCom
         const parser = parse({
             ...DEFAULT_OPTIONS,
             cast: (value, context): { value: string; valueWasQuoted: boolean } => ({ value, valueWasQuoted: context.quoting }),
-            delimiter,
+            delimiter: getValueDelimiterCharacter(delimiter),
             info: true,
             on_skip: (error): undefined => {
                 addIssue(error);
@@ -339,7 +339,7 @@ function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isCom
             relax_column_count: true,
             skip_records_with_error: true
         });
-        parser.on('data', ({ info, record }: { info: { lines: number }; record: ParsingRecord }) => {
+        parser.on('data', ({ info, record }: { info: { lines: number }; record: ParsedRecord }) => {
             records.push(record);
             lastEndLineNumber = info.lines;
         });
@@ -358,7 +358,7 @@ function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isCom
 
 // Everything the parser says about where the problem is. It counts fields from 0 and records already read, so both are
 // moved on by one. An invalid closing quote names the character it met only in its message.
-function constructParseIssue(error: ParseError, startLineNumber: number): PreviewIssue {
+function constructParseIssue(error: ParseError, startLineNumber: number): SampleIssue {
     const endLineNumber = error.lines;
     const closingQuoteCharacter = error.code === 'CSV_INVALID_CLOSING_QUOTE' ? /got "(.*?)" at line/u.exec(error.message)?.[1] : undefined;
     const value = typeof error.field === 'string' ? error.field : closingQuoteCharacter;
