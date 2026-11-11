@@ -1,7 +1,7 @@
 {
   "metadata": {
     "version": "0.14.0",
-    "generatedAt": "2026-11-07T15:10:33.882Z",
+    "generatedAt": "2026-11-11T10:26:13.562Z",
     "integration": "vite",
     "sources": false,
     "gzip": true,
@@ -30,8 +30,8 @@
       "kind": "asset",
       "name": "dist/dpuse-tool-adaltas-csv-parser.es.js",
       "type": "script",
-      "uncompressed": 138064,
-      "gzip": 33294,
+      "uncompressed": 138106,
+      "gzip": 33302,
       "brotli": 0
     },
     {
@@ -39,7 +39,7 @@
       "name": "node_modules/@dpuse/dpuse-shared/dist/dpuse-shared.es.js",
       "type": "script",
       "format": "esm",
-      "uncompressed": 57562
+      "uncompressed": 61854
     },
     {
       "kind": "chunk",
@@ -64,7 +64,7 @@
       "type": "script",
       "format": "esm",
       "uncompressed": 101570,
-      "gzip": 25914,
+      "gzip": 25915,
       "brotli": 0,
       "parent": "dist/dpuse-tool-adaltas-csv-parser.es.js"
     },
@@ -73,15 +73,15 @@
       "name": "src/index.ts",
       "type": "script",
       "format": "esm",
-      "uncompressed": 9718
+      "uncompressed": 9777
     },
     {
       "kind": "chunk",
       "name": "src/index.ts",
       "type": "script",
       "format": "esm",
-      "uncompressed": 4504,
-      "gzip": 1851,
+      "uncompressed": 4546,
+      "gzip": 1858,
       "brotli": 0,
       "parent": "dist/dpuse-tool-adaltas-csv-parser.es.js"
     }

@@ -326,6 +326,7 @@ function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isCom
         const addIssue = (error: ParseError | undefined): void => {
             if (error == null || (!isComplete && error.code === 'CSV_QUOTE_NOT_CLOSED')) return;
             issues.push(constructParseIssue(error, lastEndLineNumber + 1));
+            if (error.code === 'CSV_INVALID_CLOSING_QUOTE') return; // The parser still holds the quote open, so its record has not ended.
             if (error.lines != null) lastEndLineNumber = error.lines;
         };
         const parser = parse({

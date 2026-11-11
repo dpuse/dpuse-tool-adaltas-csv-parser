@@ -148,6 +148,14 @@ describe('Tool', () => {
             expect(result.issues[0]).toMatchObject({ fieldNumber: 2, id: 'CSV_INVALID_CLOSING_QUOTE', lineNumber: 2, value: 'y' });
         });
 
+        it('reports the quote left open after an invalid closing quote from the line that quote is on', async () => {
+            const result = await parseText('a,b\n1,"x" y\n2,3\n4,5\n', [','], true);
+
+            expect(result.issues).toHaveLength(2);
+            expect(result.issues[0]).toMatchObject({ endLineNumber: undefined, id: 'CSV_INVALID_CLOSING_QUOTE', lineNumber: 2, recordNumber: 2 });
+            expect(result.issues[1]).toMatchObject({ endLineNumber: 4, id: 'CSV_QUOTE_NOT_CLOSED', lineNumber: 2, recordNumber: 2 });
+        });
+
         it('cuts a long value short', async () => {
             const result = await parseText(`a\n${'x'.repeat(60)}"y\n`, [',']);
 
