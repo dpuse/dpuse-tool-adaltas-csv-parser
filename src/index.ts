@@ -6,12 +6,12 @@ export type { Options, Parser } from 'csv-parse/browser/esm';
 import { getValueDelimiterCharacter, ignoreErrors, parseDelimitedText, resolveDecoderId } from '@dpuse/dpuse-shared';
 import type {
     ParsedRecord,
+    ParsedRecordsChunk,
     ParserInterface,
     ParseStreamOptions,
+    ParseStreamSummary,
     ParseTextOptions,
     ParseTextResult,
-    RecordRetrievalTypeId,
-    RetrieveRecordsSummary,
     SampleIssue,
     ValueDelimiterId
 } from '@dpuse/dpuse-shared';
@@ -20,10 +20,10 @@ import type {
 
 type ParseError = Error & { code?: string; field?: unknown; index?: number; lines?: number; records?: number }; // The context csv-parse adds to an error.
 
-interface StreamRecordBuffer {
-    drain: () => Promise<void>; // Settles once the receiver has finished with every chunk handed to it so far.
-    flush: () => void;
-    push: (record: ParsedRecord) => void;
+// What the parser has produced and not yet handed over. Its events add to it as it parses.
+interface ParserOutput {
+    error: Error | undefined;
+    records: ParsedRecord[];
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -73,8 +73,6 @@ const DEFAULT_OPTIONS: Options = {
     trim: false
 };
 
-const DEFAULT_RECORD_BUFFER_POOL_SIZE = 4;
-
 // WebKit hands over a file stream in pieces of about 18 MB, against about 2 MB in Chromium. Parsing a piece that large at
 // once took the tab past 5 GB in WebKit, so each piece is parsed in slices of this size. A slice is a view, not a copy.
 const MAX_SLICE_BYTE_COUNT = 1_048_576;
@@ -90,127 +88,59 @@ export class Tool implements ParserInterface {
      * Parse stream. Reads delimited text from the stream. The caller owns the stream and its fetch, so a failed fetch is
      * the caller's to report. Aborting the signal stops the read and rejects with the signal's reason.
      */
-    async parseStream(
-        stream: ReadableStream<Uint8Array>,
-        options: ParseStreamOptions,
-        chunk: (typeId: RecordRetrievalTypeId, records: ParsedRecord[]) => void | Promise<void>
-    ): Promise<RetrieveRecordsSummary> {
-        return new Promise<RetrieveRecordsSummary>((resolve, reject) => {
-            let parser: Parser | undefined;
-            let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-            let recordBuffer: StreamRecordBuffer | undefined;
-            let hasErrored = false;
-            let hasStoppedProcessing = false;
-
-            const stopProcessing = (): void => {
-                if (hasStoppedProcessing) return;
-                hasStoppedProcessing = true;
-
-                const activeParser = parser;
-                parser = undefined;
-                recordBuffer = undefined;
-                if (activeParser != null) {
-                    ignoreErrors(() => activeParser.removeAllListeners());
-                    ignoreErrors(() => activeParser.end());
-                }
-                ignoreErrors(() => void reader?.cancel());
-                reader = undefined;
-            };
-
-            const handleError = (error: unknown): void => {
-                if (hasErrored) return;
-
-                hasErrored = true;
-                stopProcessing();
-                reject(error instanceof Error ? error : new Error(String(error)));
-            };
-
-            // The stream may not be tied to the signal, so an abort is acted on here rather than left to make a read fail.
-            options.abortSignal.addEventListener(
-                'abort',
-                () => {
-                    handleError(options.abortSignal.reason);
-                },
-                { once: true }
-            );
-
-            const run = async (): Promise<void> => {
-                options.abortSignal.throwIfAborted();
-                parser = parse({
-                    ...DEFAULT_OPTIONS,
-                    cast: (value, context): { value: string; valueWasQuoted: boolean } => ({ value, valueWasQuoted: context.quoting }),
-                    delimiter: getValueDelimiterCharacter(options.valueDelimiterId),
-                    relax_column_count: true
-                });
-                const activeRecordBuffer = constructRecordBuffer({ chunk, chunkSize: options.chunkSize ?? DEFAULT_RECORD_BUFFER_SIZE });
-                recordBuffer = activeRecordBuffer;
-                parser.on('readable', () => {
-                    try {
-                        if (parser == null || recordBuffer == null) return;
-                        let record: ParsedRecord | null;
-                        while ((record = parser.read() as ParsedRecord | null) != null) {
-                            if (hasErrored) return;
-                            options.abortSignal.throwIfAborted();
-                            recordBuffer.push(record);
-                        }
-                    } catch (error) {
-                        handleError(error);
-                    }
-                });
-                parser.on('error', (error) => {
-                    handleError(error);
-                });
-                // Finished only once the receiver has finished with the last records too.
-                const resolveOnceDrained = async (summary: RetrieveRecordsSummary): Promise<void> => {
-                    try {
-                        await activeRecordBuffer.drain();
-                        resolve(summary);
-                    } catch (error) {
-                        handleError(error);
-                    }
-                };
-                parser.on('end', () => {
-                    if (hasErrored) return;
-                    activeRecordBuffer.flush();
-                    void resolveOnceDrained(constructSummary(parser));
-                });
-
-                reader = stream.getReader();
-                const decoder = new TextDecoder(resolveDecoderId(options.encodingId));
-                let byteCount = 0;
-                let hasWrittenText = false;
-                let result = await reader.read();
-                while (!result.done) {
-                    if (hasErrored) return;
-                    options.abortSignal.throwIfAborted();
-                    byteCount += result.value.length;
-                    if ((await writeInSlices(parser, decoder, result.value, activeRecordBuffer)) > 0) hasWrittenText = true;
-                    result = await reader.read();
-                }
-
-                if (hasErrored) return;
-
-                const finalChunk = decoder.decode();
-                if (finalChunk.length > 0) {
-                    parser.write(finalChunk);
-                    hasWrittenText = true;
-                }
-
-                // 'csv-parse' fails when it is ended with nothing written, with '"listener" argument must be a function'. A
-                // stream with no text is summarised here instead, and its parser is dropped without being ended.
-                if (!hasWrittenText) {
-                    parser.removeAllListeners();
-                    parser = undefined;
-                    resolve({ byteCount, commentLineCount: 0, emptyLineCount: 0, lineCount: 0, nonUniformRecordCount: 0, recordCount: 0 });
-                    return;
-                }
-                parser.end();
-            };
-
-            void run().catch((error: unknown) => {
-                handleError(error);
-            });
+    async *parseStream(stream: ReadableStream<Uint8Array>, options: ParseStreamOptions): AsyncGenerator<ParsedRecordsChunk, ParseStreamSummary, undefined> {
+        options.abortSignal.throwIfAborted();
+        const recordsPerChunk = Math.max(1, Math.floor(options.chunkSize ?? DEFAULT_RECORD_BUFFER_SIZE));
+        const parser = parse({
+            ...DEFAULT_OPTIONS,
+            cast: (value, context): { value: string; valueWasQuoted: boolean } => ({ value, valueWasQuoted: context.quoting }),
+            delimiter: getValueDelimiterCharacter(options.valueDelimiterId),
+            relax_column_count: true
         });
+        const output = collectParserOutput(parser);
+        const reader = stream.getReader();
+        // The stream may not be tied to the signal, so an abort cancels the read rather than waiting for the next piece.
+        const cancelRead = (): void => {
+            ignoreErrors(() => void reader.cancel(options.abortSignal.reason));
+        };
+        options.abortSignal.addEventListener('abort', cancelRead, { once: true });
+
+        try {
+            const decoder = new TextDecoder(resolveDecoderId(options.encodingId));
+            let byteCount = 0;
+            let hasWrittenText = false;
+            let result = await reader.read();
+            while (!result.done) {
+                byteCount += result.value.length;
+                for (let sliceStart = 0; sliceStart < result.value.length; sliceStart += MAX_SLICE_BYTE_COUNT) {
+                    options.abortSignal.throwIfAborted();
+                    const decodedSlice = decoder.decode(result.value.subarray(sliceStart, sliceStart + MAX_SLICE_BYTE_COUNT), { stream: true });
+                    if (decodedSlice.length === 0) continue;
+                    hasWrittenText = true;
+                    if (!parser.write(decodedSlice) && output.error == null) await waitForParser(parser, 'drain'); // The parser's buffer is full, so the read waits until it empties.
+                    yield* takeChunks(output, recordsPerChunk, options.abortSignal, false);
+                }
+                result = await reader.read();
+            }
+            options.abortSignal.throwIfAborted();
+
+            const finalText = decoder.decode();
+            if (finalText.length > 0) {
+                parser.write(finalText);
+                hasWrittenText = true;
+            }
+            // 'csv-parse' fails when it is ended with nothing written, with '"listener" argument must be a function'. A
+            // stream with no text is summarised here instead, and its parser is dropped without being ended.
+            if (!hasWrittenText) return { byteCount, commentLineCount: 0, emptyLineCount: 0, lineCount: 0, nonUniformRecordCount: 0, recordCount: 0 };
+            parser.end();
+            if (output.error == null) await waitForParser(parser, 'end');
+            yield* takeChunks(output, recordsPerChunk, options.abortSignal, true);
+            return constructSummary(parser);
+        } finally {
+            options.abortSignal.removeEventListener('abort', cancelRead);
+            parser.removeAllListeners();
+            ignoreErrors(() => void reader.cancel()); // Releases the item when the receiver stops before the end. A stream already read through ignores it.
+        }
     }
 
     /**
@@ -226,80 +156,47 @@ export class Tool implements ParserInterface {
 
 //#region: Parse stream helpers.
 
-// Decodes the bytes and writes them to the parser one slice at a time. Returns the number of characters written.
-async function writeInSlices(parser: Parser, decoder: TextDecoder, bytes: Uint8Array, recordBuffer: StreamRecordBuffer): Promise<number> {
-    let writtenLength = 0;
-    for (let sliceStart = 0; sliceStart < bytes.length; sliceStart += MAX_SLICE_BYTE_COUNT) {
-        const decodedSlice = decoder.decode(bytes.subarray(sliceStart, sliceStart + MAX_SLICE_BYTE_COUNT), { stream: true });
-        if (decodedSlice.length > 0) {
-            writtenLength += decodedSlice.length;
-            if (!parser.write(decodedSlice)) await waitForDrain(parser); // The parser's buffer is full, so the read waits until it empties.
-        }
-        await recordBuffer.drain(); // A receiver that is slower than the parser holds the read back.
-    }
-    return writtenLength;
+// Collects the records the parser has read, and its error if it fails. The 'readable' handler takes every record as soon
+// as it is ready, so the parser's own buffer never fills while records wait to be handed over.
+function collectParserOutput(parser: Parser): ParserOutput {
+    const output: ParserOutput = { error: undefined, records: [] };
+    parser.on('readable', () => {
+        let record: ParsedRecord | null;
+        while ((record = parser.read() as ParsedRecord | null) != null) output.records.push(record);
+    });
+    parser.on('error', (error) => {
+        output.error = error;
+    });
+    return output;
 }
 
-// Settles when the parser asks for more text. A parser that is stopped meanwhile drops its listeners, so the wait is
-// then left unsettled along with the rest of the read.
-function waitForDrain(parser: Parser): Promise<void> {
+// Hands over what the parser has read, a chunk at a time, or fails with its error. Only full chunks go until the text
+// has all been parsed, then the rest goes too. The abort is checked before each chunk, because a receiver can abort
+// between asking for one chunk and the next.
+function* takeChunks(output: ParserOutput, recordsPerChunk: number, abortSignal: AbortSignal, isFinal: boolean): Generator<ParsedRecordsChunk> {
+    if (output.error != null) throw output.error;
+    while (output.records.length >= recordsPerChunk || (isFinal && output.records.length > 0)) {
+        abortSignal.throwIfAborted();
+        yield { records: output.records.splice(0, recordsPerChunk), typeId: 'parsingRecordArray' };
+    }
+}
+
+// Settles when the parser emits the event, or fails. A parser that has already failed emits neither, so the caller checks
+// for a failure before waiting, and again after.
+function waitForParser(parser: Parser, eventName: 'drain' | 'end'): Promise<void> {
     return new Promise((resolve) => {
-        parser.once('drain', () => {
+        const settle = (): void => {
+            parser.removeListener(eventName, settle);
+            parser.removeListener('error', settle);
             resolve();
-        });
+        };
+        parser.once(eventName, settle);
+        parser.once('error', settle);
     });
 }
 
-/**
- * Construct record buffer.
- */
-function constructRecordBuffer(bufferOptions: { chunk: (typeId: RecordRetrievalTypeId, records: ParsedRecord[]) => void | Promise<void>; chunkSize: number }): StreamRecordBuffer {
-    const recordsPerChunk = Math.max(1, Math.floor(bufferOptions.chunkSize));
-    const pool: ParsedRecord[][] = [];
-    const pendingReceipts: Promise<void>[] = []; // The receiver's promises for chunks it is still working on.
-    let records = allocateBuffer();
-    let recordCount = 0;
-
-    const flush = (): void => {
-        if (recordCount === 0) return;
-        const recordsToEmit = records;
-        recordsToEmit.length = recordCount; // Trim before handing off so consumers only see populated entries.
-        records = allocateBuffer();
-        recordCount = 0;
-        const receipt = bufferOptions.chunk('parsingRecordArray', recordsToEmit);
-        if (receipt instanceof Promise) {
-            pendingReceipts.push(receipt); // The receiver may still be reading the array, so it is not reused.
-            return;
-        }
-        if (pool.length < DEFAULT_RECORD_BUFFER_POOL_SIZE) pool.push(recordsToEmit);
-    };
-
-    const drain = async (): Promise<void> => {
-        while (pendingReceipts.length > 0) await Promise.all(pendingReceipts.splice(0));
-    };
-
-    const push = (record: ParsedRecord): void => {
-        records[recordCount++] = record;
-        if (recordCount >= recordsPerChunk) flush();
-    };
-
-    return { drain, flush, push };
-
-    function allocateBuffer(): ParsedRecord[] {
-        const pooled = pool.pop();
-        if (pooled != null) {
-            pooled.length = 0;
-            return pooled;
-        }
-
-        const allocated = Array.from<ParsedRecord>({ length: recordsPerChunk });
-        allocated.length = 0;
-        return allocated;
-    }
-}
-
 /** Construct summary. */
-function constructSummary(parser: Parser | undefined): RetrieveRecordsSummary {
+function constructSummary(parser: Parser | undefined): ParseStreamSummary {
     return {
         byteCount: parser?.info.bytes ?? -1,
         commentLineCount: parser?.info.comment_lines ?? -1,

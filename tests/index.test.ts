@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 // ── Local Framework
 import { Tool } from '@/index';
-import type { ParseStreamOptions, ValueDelimiterId } from '@dpuse/dpuse-shared';
+import type { ParsedRecordsChunk, ParseStreamOptions, ParseStreamSummary, ValueDelimiterId } from '@dpuse/dpuse-shared';
 
 // ── Tests ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -22,6 +22,18 @@ function streamOf(content: string | Uint8Array): ReadableStream<Uint8Array> {
 
 function buildStreamOptions(overrides: Partial<ParseStreamOptions> = {}): ParseStreamOptions {
     return { abortSignal: new AbortController().signal, chunkSize: undefined, dataFormatId: 'dtv', encodingId: 'utf-8', valueDelimiterId: ',', ...overrides };
+}
+
+// Reads a parse through, keeping each chunk and the summary it ends with.
+async function readParse(stream: ReadableStream<Uint8Array>, options: ParseStreamOptions): Promise<{ chunks: ParsedRecordsChunk[]; summary: ParseStreamSummary }> {
+    const parsing = new Tool().parseStream(stream, options);
+    const chunks: ParsedRecordsChunk[] = [];
+    let result = await parsing.next();
+    while (result.done !== true) {
+        chunks.push(result.value);
+        result = await parsing.next();
+    }
+    return { chunks, summary: result.value };
 }
 
 function readValues(records: unknown[][]): string[][] {
@@ -183,18 +195,14 @@ describe('Tool', () => {
 
     describe('parseStream', () => {
         it('stops with the parse error when a value holds a stray quote', async () => {
-            await expect(new Tool().parseStream(streamOf('a,b\nab"c,1\n'), buildStreamOptions({ chunkSize: 10 }), vi.fn())).rejects.toThrow(/Invalid Opening Quote/);
+            await expect(readParse(streamOf('a,b\nab"c,1\n'), buildStreamOptions({ chunkSize: 10 }))).rejects.toThrow(/Invalid Opening Quote/);
         });
 
         it('streams records in chunks of the requested size, then summarises them', async () => {
-            const chunks: unknown[][][] = [];
+            const { chunks, summary } = await readParse(streamOf('a,b\n1,2\n3,4\n5,6\n'), buildStreamOptions({ chunkSize: 2 }));
 
-            const summary = await new Tool().parseStream(streamOf('a,b\n1,2\n3,4\n5,6\n'), buildStreamOptions({ chunkSize: 2 }), (typeId, records) => {
-                expect(typeId).toBe('parsingRecordArray');
-                chunks.push([...records]);
-            });
-
-            expect(chunks.map((records) => readValues(records))).toEqual([
+            expect(chunks.map((chunk) => chunk.typeId)).toEqual(['parsingRecordArray', 'parsingRecordArray']);
+            expect(chunks.map((chunk) => readValues(chunk.records))).toEqual([
                 [
                     ['a', 'b'],
                     ['1', '2']
@@ -209,35 +217,25 @@ describe('Tool', () => {
 
         it('waits for the parser to take more text when one chunk overfills it, then reads every record', async () => {
             const recordCount = 50_000; // About 0.5 MB in one chunk, far past the parser's 16 KB buffer, so writing it returns false.
-            let receivedRecordCount = 0;
 
-            const summary = await new Tool().parseStream(streamOf('1,2\n'.repeat(recordCount)), buildStreamOptions(), (_typeId, records) => {
-                receivedRecordCount += records.length;
-            });
+            const { chunks, summary } = await readParse(streamOf('1,2\n'.repeat(recordCount)), buildStreamOptions());
 
-            expect(receivedRecordCount).toBe(recordCount);
+            expect(chunks.reduce((total, chunk) => total + chunk.records.length, 0)).toBe(recordCount);
             expect(summary.recordCount).toBe(recordCount);
         });
 
         it('reads a piece larger than a slice, with a character split between slices', async () => {
             const value = 'é'.repeat(300_000); // 600,000 bytes, so a slice of 1,048,576 bytes ends inside the second record's 'é'.
-            let values: string[][] = [];
 
-            await new Tool().parseStream(streamOf(`${value}\n${value}\n${value}\n`), buildStreamOptions(), (_typeId, records) => {
-                values = [...values, ...readValues(records)];
-            });
+            const { chunks } = await readParse(streamOf(`${value}\n${value}\n${value}\n`), buildStreamOptions());
 
-            expect(values).toEqual([[value], [value], [value]]);
+            expect(chunks.flatMap((chunk) => readValues(chunk.records))).toEqual([[value], [value], [value]]);
         });
 
         it('splits values with the delimiter it is given', async () => {
-            const chunks: unknown[][][] = [];
+            const { chunks } = await readParse(streamOf('a;b\n1;2\n'), buildStreamOptions({ valueDelimiterId: ';' }));
 
-            await new Tool().parseStream(streamOf('a;b\n1;2\n'), buildStreamOptions({ valueDelimiterId: ';' }), (_typeId, records) => {
-                chunks.push([...records]);
-            });
-
-            expect(chunks.map((records) => readValues(records))).toEqual([
+            expect(chunks.map((chunk) => readValues(chunk.records))).toEqual([
                 [
                     ['a', 'b'],
                     ['1', '2']
@@ -246,13 +244,9 @@ describe('Tool', () => {
         });
 
         it('notes which values were quoted', async () => {
-            const chunks: unknown[][][] = [];
+            const { chunks } = await readParse(streamOf('"a",b\n'), buildStreamOptions());
 
-            await new Tool().parseStream(streamOf('"a",b\n'), buildStreamOptions(), (_typeId, records) => {
-                chunks.push([...records]);
-            });
-
-            expect(chunks[0]?.[0]).toEqual([
+            expect(chunks[0]?.records[0]).toEqual([
                 { value: 'a', valueWasQuoted: true },
                 { value: 'b', valueWasQuoted: false }
             ]);
@@ -261,59 +255,61 @@ describe('Tool', () => {
         // 'macroman' is jschardet's 'MacRoman' in lower case; browsers only decode it as 'macintosh', where 0x8e is 'é'.
         it('decodes with the browser name for the encoding id', async () => {
             const macRomanBytes = new Uint8Array([0x63, 0x61, 0x66, 0x8e, 0x2c, 0x31, 0x0a]); // 'café,1' and a line break.
-            const chunks: unknown[][][] = [];
 
-            await new Tool().parseStream(streamOf(macRomanBytes), buildStreamOptions({ chunkSize: 10, encodingId: 'macroman' }), (_typeId, records) => {
-                chunks.push([...records]);
-            });
+            const { chunks } = await readParse(streamOf(macRomanBytes), buildStreamOptions({ chunkSize: 10, encodingId: 'macroman' }));
 
-            expect(chunks.map((records) => readValues(records))).toEqual([[['café', '1']]]);
+            expect(chunks.map((chunk) => readValues(chunk.records))).toEqual([[['café', '1']]]);
         });
 
         it('counts records with a different number of values rather than failing, so an audit can report them', async () => {
-            const summary = await new Tool().parseStream(streamOf('a,b\n1,2,3\n4,5\n'), buildStreamOptions(), vi.fn());
+            const { summary } = await readParse(streamOf('a,b\n1,2,3\n4,5\n'), buildStreamOptions());
 
             expect(summary).toMatchObject({ nonUniformRecordCount: 1, recordCount: 3 });
         });
 
-        it("does not finish until the receiver's promise for the last records has settled", async () => {
-            const { promise: receipt, resolve: settleReceipt } = Promise.withResolvers<undefined>();
-            let isFinished = false;
-            const parseAll = async (): Promise<void> => {
-                await new Tool().parseStream(streamOf('a,b\n1,2\n'), buildStreamOptions(), () => receipt);
-                isFinished = true;
-            };
+        it('reads no further until the next chunk is asked for', async () => {
+            const encoder = new TextEncoder();
+            const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+                controller.enqueue(encoder.encode('1\n2\n'));
+            });
+            const parsing = new Tool().parseStream(new ReadableStream<Uint8Array>({ pull }, { highWaterMark: 0 }), buildStreamOptions({ chunkSize: 2 }));
 
-            const parsing = parseAll();
+            await parsing.next();
+            const pullCount = pull.mock.calls.length;
             await new Promise((resolve) => setTimeout(resolve, 20));
-            expect(isFinished).toBe(false);
 
-            settleReceipt(undefined);
-            await parsing;
-            expect(isFinished).toBe(true);
+            expect(pull).toHaveBeenCalledTimes(pullCount);
+            await parsing.return({} as ParseStreamSummary);
         });
 
-        it("rejects when the receiver's promise rejects", async () => {
-            await expect(new Tool().parseStream(streamOf('a,b\n'), buildStreamOptions(), () => Promise.reject(new Error('Not stored.')))).rejects.toThrow('Not stored.');
-        });
-
-        it('does not reuse an array its receiver is still working on', async () => {
-            const chunks: unknown[][][] = [];
-
-            await new Tool().parseStream(streamOf('a\nb\nc\nd\ne\n'), buildStreamOptions({ chunkSize: 1 }), async (_typeId, records) => {
-                chunks.push(records);
-                await Promise.resolve();
+        it('cancels the stream when the receiver stops before the end', async () => {
+            const cancel = vi.fn();
+            const stream = new ReadableStream<Uint8Array>({
+                start(controller): void {
+                    controller.enqueue(new TextEncoder().encode('a\nb\nc\n')); // Then never ends.
+                },
+                cancel
             });
 
-            expect(chunks.map((records) => readValues(records))).toEqual([[['a']], [['b']], [['c']], [['d']], [['e']]]);
+            const parsing = new Tool().parseStream(stream, buildStreamOptions({ chunkSize: 1 }));
+            for await (const chunk of parsing) {
+                expect(readValues(chunk.records)).toEqual([['a']]);
+                break; // Stops after the first chunk, as a store does when its write fails.
+            }
+
+            expect(cancel).toHaveBeenCalled();
+        });
+
+        it('hands over a new array for each chunk, so a receiver can keep one', async () => {
+            const { chunks } = await readParse(streamOf('a\nb\nc\nd\ne\n'), buildStreamOptions({ chunkSize: 1 }));
+
+            expect(chunks.map((chunk) => readValues(chunk.records))).toEqual([[['a']], [['b']], [['c']], [['d']], [['e']]]);
         });
 
         it('reads an empty stream as no records', async () => {
-            const chunk = vi.fn();
+            const { chunks, summary } = await readParse(streamOf(''), buildStreamOptions());
 
-            const summary = await new Tool().parseStream(streamOf(''), buildStreamOptions(), chunk);
-
-            expect(chunk).not.toHaveBeenCalled();
+            expect(chunks).toEqual([]);
             expect(summary.recordCount).toBe(0);
         });
 
@@ -321,7 +317,7 @@ describe('Tool', () => {
             const abortController = new AbortController();
             abortController.abort(new Error('Stopped.'));
 
-            await expect(new Tool().parseStream(streamOf('a,b\n'), buildStreamOptions({ abortSignal: abortController.signal }), vi.fn())).rejects.toThrow('Stopped.');
+            await expect(readParse(streamOf('a,b\n'), buildStreamOptions({ abortSignal: abortController.signal }))).rejects.toThrow('Stopped.');
         });
 
         it('rejects with the signal’s reason and cancels the stream when aborted while reading, even if the stream is not tied to the signal', async () => {
@@ -333,11 +329,12 @@ describe('Tool', () => {
                 cancel
             });
             const abortController = new AbortController();
-            const chunk = vi.fn(() => {
-                abortController.abort(new Error('Stopped.'));
-            });
+            const parsing = new Tool().parseStream(stream, buildStreamOptions({ abortSignal: abortController.signal, chunkSize: 1 }));
 
-            await expect(new Tool().parseStream(stream, buildStreamOptions({ abortSignal: abortController.signal, chunkSize: 1 }), chunk)).rejects.toThrow('Stopped.');
+            await parsing.next();
+            abortController.abort(new Error('Stopped.'));
+
+            await expect(parsing.next()).rejects.toThrow('Stopped.');
             expect(cancel).toHaveBeenCalled();
         });
     });
