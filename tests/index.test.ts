@@ -36,17 +36,13 @@ async function readParse(stream: ReadableStream<Uint8Array>, options: ParseStrea
     return { chunks, summary: result.value };
 }
 
-function readValues(records: unknown[][]): string[][] {
-    return records.map((record) => record.map((field) => (field as { value: string }).value));
-}
-
 describe('Tool', () => {
     describe('parseText', () => {
         it('detects the value delimiter that splits every record evenly', async () => {
             const result = await parseText('name;age\nAda;36\nGrace;85\n', [',', ';', '\t']);
 
             expect(result.valueDelimiterId).toBe(';');
-            expect(readValues(result.parsedRecords)).toEqual([
+            expect(result.parsedRecords).toEqual([
                 ['name', 'age'],
                 ['Ada', '36'],
                 ['Grace', '85']
@@ -58,7 +54,7 @@ describe('Tool', () => {
             const result = await parseText('name\u{1E}age\nAda\u{1E}36\n', ['0x1E']);
 
             expect(result.valueDelimiterId).toBe('0x1E');
-            expect(readValues(result.parsedRecords)).toEqual([
+            expect(result.parsedRecords).toEqual([
                 ['name', 'age'],
                 ['Ada', '36']
             ]);
@@ -84,7 +80,7 @@ describe('Tool', () => {
             const result = await parseText('Ada\nGrace\n', [',']);
 
             expect(result.valueDelimiterId).toBeUndefined();
-            expect(readValues(result.parsedRecords)).toEqual([['Ada'], ['Grace']]);
+            expect(result.parsedRecords).toEqual([['Ada'], ['Grace']]);
         });
 
         it('reports a quote error that every delimiter meets as an issue, keeping the records it could read', async () => {
@@ -93,14 +89,14 @@ describe('Tool', () => {
             expect(result.issues).toHaveLength(1);
             expect(result.issues[0]).toMatchObject({ id: 'INVALID_OPENING_QUOTE', lineNumber: 2, severityId: 'error' });
             expect(result.issues[0]?.message).toMatch(/Invalid Opening Quote/);
-            expect(readValues(result.parsedRecords)).toEqual([['a', 'b']]);
+            expect(result.parsedRecords).toEqual([['a', 'b']]);
         });
 
         it('reports every record it cannot read, not just the first', async () => {
             const result = await parseText('a,b\nab"c,1\nx,y\nd"e,2\n', [',']);
 
             expect(result.issues.map((issue) => issue.lineNumber)).toEqual([2, 4]);
-            expect(readValues(result.parsedRecords)).toEqual([
+            expect(result.parsedRecords).toEqual([
                 ['a', 'b'],
                 ['x', 'y']
             ]);
@@ -116,7 +112,7 @@ describe('Tool', () => {
             const result = await parseText('"x,y";1\n"z,w";2\n', [',', ';']);
 
             expect(result.valueDelimiterId).toBe(';');
-            expect(readValues(result.parsedRecords)).toEqual([
+            expect(result.parsedRecords).toEqual([
                 ['x,y', '1'],
                 ['z,w', '2']
             ]);
@@ -127,7 +123,7 @@ describe('Tool', () => {
 
             expect(result.issues).toEqual([]);
             expect(result.valueDelimiterId).toBe(',');
-            expect(readValues(result.parsedRecords)).toEqual([
+            expect(result.parsedRecords).toEqual([
                 ['a', 'b'],
                 ['1', '2']
             ]);
@@ -174,13 +170,10 @@ describe('Tool', () => {
             expect(result.issues[0]?.value).toBe(`${'x'.repeat(50)}…`);
         });
 
-        it('notes which values were quoted', async () => {
-            const result = await parseText('"a",b\n', [',']);
+        it('reads a value with nothing written as null, and keeps an empty quoted value and spaces as written', async () => {
+            const result = await parseText('"",, ,"a"\n', [',']);
 
-            expect(result.parsedRecords[0]).toEqual([
-                { value: 'a', valueWasQuoted: true },
-                { value: 'b', valueWasQuoted: false }
-            ]);
+            expect(result.parsedRecords[0]).toEqual(['', null, ' ', 'a']);
         });
 
         it.each([
@@ -202,7 +195,7 @@ describe('Tool', () => {
             const { chunks, summary } = await readParse(streamOf('a,b\n1,2\n3,4\n5,6\n'), buildStreamOptions({ chunkSize: 2 }));
 
             expect(chunks.map((chunk) => chunk.typeId)).toEqual(['parsingRecordArray', 'parsingRecordArray']);
-            expect(chunks.map((chunk) => readValues(chunk.records))).toEqual([
+            expect(chunks.map((chunk) => chunk.records)).toEqual([
                 [
                     ['a', 'b'],
                     ['1', '2']
@@ -229,13 +222,13 @@ describe('Tool', () => {
 
             const { chunks } = await readParse(streamOf(`${value}\n${value}\n${value}\n`), buildStreamOptions());
 
-            expect(chunks.flatMap((chunk) => readValues(chunk.records))).toEqual([[value], [value], [value]]);
+            expect(chunks.flatMap((chunk) => chunk.records)).toEqual([[value], [value], [value]]);
         });
 
         it('splits values with the delimiter it is given', async () => {
             const { chunks } = await readParse(streamOf('a;b\n1;2\n'), buildStreamOptions({ valueDelimiterId: ';' }));
 
-            expect(chunks.map((chunk) => readValues(chunk.records))).toEqual([
+            expect(chunks.map((chunk) => chunk.records)).toEqual([
                 [
                     ['a', 'b'],
                     ['1', '2']
@@ -243,13 +236,10 @@ describe('Tool', () => {
             ]);
         });
 
-        it('notes which values were quoted', async () => {
-            const { chunks } = await readParse(streamOf('"a",b\n'), buildStreamOptions());
+        it('reads a value with nothing written as null, and keeps an empty quoted value and spaces as written', async () => {
+            const { chunks } = await readParse(streamOf('"",, ,"a"\n'), buildStreamOptions());
 
-            expect(chunks[0]?.records[0]).toEqual([
-                { value: 'a', valueWasQuoted: true },
-                { value: 'b', valueWasQuoted: false }
-            ]);
+            expect(chunks[0]?.records[0]).toEqual(['', null, ' ', 'a']);
         });
 
         // 'macroman' is jschardet's 'MacRoman' in lower case; browsers only decode it as 'macintosh', where 0x8e is 'é'.
@@ -258,7 +248,7 @@ describe('Tool', () => {
 
             const { chunks } = await readParse(streamOf(macRomanBytes), buildStreamOptions({ chunkSize: 10, encodingId: 'macroman' }));
 
-            expect(chunks.map((chunk) => readValues(chunk.records))).toEqual([[['café', '1']]]);
+            expect(chunks.map((chunk) => chunk.records)).toEqual([[['café', '1']]]);
         });
 
         it('counts records with a different number of values rather than failing, so an audit can report them', async () => {
@@ -293,7 +283,7 @@ describe('Tool', () => {
 
             const parsing = new Tool().parseStream(stream, buildStreamOptions({ chunkSize: 1 }));
             for await (const chunk of parsing) {
-                expect(readValues(chunk.records)).toEqual([['a']]);
+                expect(chunk.records).toEqual([['a']]);
                 break; // Stops after the first chunk, as a store does when its write fails.
             }
 
@@ -303,7 +293,7 @@ describe('Tool', () => {
         it('hands over a new array for each chunk, so a receiver can keep one', async () => {
             const { chunks } = await readParse(streamOf('a\nb\nc\nd\ne\n'), buildStreamOptions({ chunkSize: 1 }));
 
-            expect(chunks.map((chunk) => readValues(chunk.records))).toEqual([[['a']], [['b']], [['c']], [['d']], [['e']]]);
+            expect(chunks.map((chunk) => chunk.records)).toEqual([[['a']], [['b']], [['c']], [['d']], [['e']]]);
         });
 
         it('reads an empty stream as no records', async () => {

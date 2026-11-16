@@ -1,5 +1,5 @@
 // ── External Dependencies & Registrations
-import { type Options, parse, type Parser } from 'csv-parse/browser/esm';
+import { type InfoField, type Options, parse, type Parser } from 'csv-parse/browser/esm';
 export type { Options, Parser } from 'csv-parse/browser/esm';
 
 // ── DPUse Framework
@@ -93,7 +93,7 @@ export class Tool implements ParserInterface {
         const recordsPerChunk = Math.max(1, Math.floor(options.chunkSize ?? DEFAULT_RECORD_BUFFER_SIZE));
         const parser = parse({
             ...DEFAULT_OPTIONS,
-            cast: (value, context): { value: string; valueWasQuoted: boolean } => ({ value, valueWasQuoted: context.quoting }),
+            cast: castValue,
             delimiter: getValueDelimiterCharacter(options.valueDelimiterId),
             relax_column_count: true
         });
@@ -153,6 +153,12 @@ export class Tool implements ParserInterface {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+// A value with nothing written, such as ',,', is null. An empty quoted value, '""', stays an empty string, so the two
+// can still be told apart.
+function castValue(value: string, context: InfoField): string | null {
+    return value === '' && !context.quoting ? null : value;
+}
 
 //#region: Parse stream helpers.
 
@@ -228,7 +234,7 @@ function parseTextWithDelimiter(text: string, delimiter: ValueDelimiterId, isCom
         };
         const parser = parse({
             ...DEFAULT_OPTIONS,
-            cast: (value, context): { value: string; valueWasQuoted: boolean } => ({ value, valueWasQuoted: context.quoting }),
+            cast: castValue,
             delimiter: getValueDelimiterCharacter(delimiter),
             info: true,
             on_skip: (error): undefined => {
