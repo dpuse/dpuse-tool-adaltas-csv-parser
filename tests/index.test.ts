@@ -7,8 +7,10 @@ import type { ParsedRecordsChunk, ParseStreamOptions, ParseStreamSummary, ValueD
 
 // ── Tests ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-function parseText(text: string, valueDelimiterIds: ValueDelimiterId[], isComplete = false): ReturnType<Tool['parseText']> {
-    return new Tool().parseText(text, { dataFormatId: 'dtv', isComplete, valueDelimiterIds });
+// The preview's text as the bytes the parser is given, in UTF-8 unless a test says otherwise.
+function parsePreview(text: string | Uint8Array, valueDelimiterIds: ValueDelimiterId[], isComplete = false, encodingId = 'utf-8'): ReturnType<Tool['parsePreview']> {
+    const bytes = typeof text === 'string' ? new TextEncoder().encode(text) : text;
+    return new Tool().parsePreview(bytes, { dataFormatId: 'dtv', encodingId, isComplete, valueDelimiterIds });
 }
 
 function streamOf(content: string | Uint8Array): ReadableStream<Uint8Array> {
@@ -37,9 +39,15 @@ async function readParse(stream: ReadableStream<Uint8Array>, options: ParseStrea
 }
 
 describe('Tool', () => {
-    describe('parseText', () => {
+    describe('parsePreview', () => {
+        it('decodes the preview with the encoding it was read in, as parseStream does', async () => {
+            const result = await parsePreview(new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x2c, 0x31, 0x0a]), [','], true, 'windows-1252'); // 'café,1' in windows-1252.
+
+            expect(result.parsedRecords).toEqual([['café', '1']]);
+        });
+
         it('detects the value delimiter that splits every record evenly', async () => {
-            const result = await parseText('name;age\nAda;36\nGrace;85\n', [',', ';', '\t']);
+            const result = await parsePreview('name;age\nAda;36\nGrace;85\n', [',', ';', '\t']);
 
             expect(result.valueDelimiterId).toBe(';');
             expect(result.parsedRecords).toEqual([
@@ -51,7 +59,7 @@ describe('Tool', () => {
 
         // The record separator's id is the text '0x1E', so the parser must be given the character itself.
         it('splits values on the record separator character', async () => {
-            const result = await parseText('name\u{1E}age\nAda\u{1E}36\n', ['0x1E']);
+            const result = await parsePreview('name\u{1E}age\nAda\u{1E}36\n', ['0x1E']);
 
             expect(result.valueDelimiterId).toBe('0x1E');
             expect(result.parsedRecords).toEqual([
@@ -65,26 +73,26 @@ describe('Tool', () => {
             ['a single column of values', 'Ada\nGrace\nKatherine\n'],
             ['empty text', '']
         ])('reports %s as not delimited', async (_description, text) => {
-            const result = await parseText(text, [',', ';', '\t']);
+            const result = await parsePreview(text, [',', ';', '\t']);
 
             expect(result.valueDelimiterId).toBeUndefined();
         });
 
         it('allows a few ragged rows in delimited text', async () => {
-            const result = await parseText('name,age,city\nAda,36,London\nGrace,85\nKatherine,101,Hampton\n', [',', ';']);
+            const result = await parsePreview('name,age,city\nAda,36,London\nGrace,85\nKatherine,101,Hampton\n', [',', ';']);
 
             expect(result.valueDelimiterId).toBe(',');
         });
 
         it('keeps the records of text that is not delimited, so it can still be shown as a table', async () => {
-            const result = await parseText('Ada\nGrace\n', [',']);
+            const result = await parsePreview('Ada\nGrace\n', [',']);
 
             expect(result.valueDelimiterId).toBeUndefined();
             expect(result.parsedRecords).toEqual([['Ada'], ['Grace']]);
         });
 
         it('reports a quote error that every delimiter meets as an issue, keeping the records it could read', async () => {
-            const result = await parseText('a,b\nab"c,1\n', [',', ';']);
+            const result = await parsePreview('a,b\nab"c,1\n', [',', ';']);
 
             expect(result.issues).toHaveLength(1);
             expect(result.issues[0]).toMatchObject({ id: 'INVALID_OPENING_QUOTE', lineNumber: 2, severityId: 'error' });
@@ -93,7 +101,7 @@ describe('Tool', () => {
         });
 
         it('reports every record it cannot read, not just the first', async () => {
-            const result = await parseText('a,b\nab"c,1\nx,y\nd"e,2\n', [',']);
+            const result = await parsePreview('a,b\nab"c,1\nx,y\nd"e,2\n', [',']);
 
             expect(result.issues.map((issue) => issue.lineNumber)).toEqual([2, 4]);
             expect(result.parsedRecords).toEqual([
@@ -103,13 +111,13 @@ describe('Tool', () => {
         });
 
         it('reports no issues for text that parses cleanly', async () => {
-            const result = await parseText('name;age\nAda;36\n', [',', ';']);
+            const result = await parsePreview('name;age\nAda;36\n', [',', ';']);
 
             expect(result.issues).toEqual([]);
         });
 
         it('rules out a delimiter whose parse fails', async () => {
-            const result = await parseText('"x,y";1\n"z,w";2\n', [',', ';']);
+            const result = await parsePreview('"x,y";1\n"z,w";2\n', [',', ';']);
 
             expect(result.valueDelimiterId).toBe(';');
             expect(result.parsedRecords).toEqual([
@@ -119,7 +127,7 @@ describe('Tool', () => {
         });
 
         it('keeps the records before a quoted value cut off at the end of the preview', async () => {
-            const result = await parseText('a,b\n1,2\n3,"multi\nline', [',']);
+            const result = await parsePreview('a,b\n1,2\n3,"multi\nline', [',']);
 
             expect(result.issues).toEqual([]);
             expect(result.valueDelimiterId).toBe(',');
@@ -130,7 +138,7 @@ describe('Tool', () => {
         });
 
         it('reports a quote still open at the end of a whole file', async () => {
-            const result = await parseText('a,b\n1,2\n3,"never closed\n', [','], true);
+            const result = await parsePreview('a,b\n1,2\n3,"never closed\n', [','], true);
 
             expect(result.issues).toHaveLength(1);
             expect(result.issues[0]).toMatchObject({ id: 'CSV_QUOTE_NOT_CLOSED', lineNumber: 3, severityId: 'error' });
@@ -138,26 +146,26 @@ describe('Tool', () => {
         });
 
         it('reports a quote never closed from the line its record starts on to where parsing gave up', async () => {
-            const result = await parseText('a,b\n1,2\n3,"multi\nline\n4,5\n', [','], true);
+            const result = await parsePreview('a,b\n1,2\n3,"multi\nline\n4,5\n', [','], true);
 
             expect(result.issues).toHaveLength(1);
             expect(result.issues[0]).toMatchObject({ endLineNumber: 5, fieldNumber: 2, id: 'CSV_QUOTE_NOT_CLOSED', lineNumber: 3, recordNumber: 3 });
         });
 
         it('reports the value with an opening quote in it, and where it is', async () => {
-            const result = await parseText('a,b\nx,ab"c\n1,2\n', [',']);
+            const result = await parsePreview('a,b\nx,ab"c\n1,2\n', [',']);
 
             expect(result.issues[0]).toMatchObject({ endLineNumber: undefined, fieldNumber: 2, lineNumber: 2, recordNumber: 2, value: 'ab' });
         });
 
         it('reports the character found after a closing quote', async () => {
-            const result = await parseText('a,b\n1,"x"y\n', [','], true);
+            const result = await parsePreview('a,b\n1,"x"y\n', [','], true);
 
             expect(result.issues[0]).toMatchObject({ fieldNumber: 2, id: 'CSV_INVALID_CLOSING_QUOTE', lineNumber: 2, value: 'y' });
         });
 
         it('reports the quote left open after an invalid closing quote from the line that quote is on', async () => {
-            const result = await parseText('a,b\n1,"x" y\n2,3\n4,5\n', [','], true);
+            const result = await parsePreview('a,b\n1,"x" y\n2,3\n4,5\n', [','], true);
 
             expect(result.issues).toHaveLength(2);
             expect(result.issues[0]).toMatchObject({ endLineNumber: undefined, id: 'CSV_INVALID_CLOSING_QUOTE', lineNumber: 2, recordNumber: 2 });
@@ -165,13 +173,13 @@ describe('Tool', () => {
         });
 
         it('cuts a long value short', async () => {
-            const result = await parseText(`a\n${'x'.repeat(60)}"y\n`, [',']);
+            const result = await parsePreview(`a\n${'x'.repeat(60)}"y\n`, [',']);
 
             expect(result.issues[0]?.value).toBe(`${'x'.repeat(50)}…`);
         });
 
         it('reads a value with nothing written as null, and keeps an empty quoted value and spaces as written', async () => {
-            const result = await parseText('"",, ,"a"\n', [',']);
+            const result = await parsePreview('"",, ,"a"\n', [',']);
 
             expect(result.parsedRecords[0]).toEqual(['', null, ' ', 'a']);
         });
@@ -181,7 +189,7 @@ describe('Tool', () => {
             ['\n', 'a\nb\nc'],
             ['\r', 'a\rb\rc']
         ])('detects %j as the record delimiter', async (recordDelimiterId, text) => {
-            const result = await parseText(text, [',']);
+            const result = await parsePreview(text, [',']);
             expect(result.recordDelimiterId).toBe(recordDelimiterId);
         });
     });

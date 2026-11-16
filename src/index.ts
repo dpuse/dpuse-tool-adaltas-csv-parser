@@ -3,15 +3,15 @@ import { type InfoField, type Options, parse, type Parser } from 'csv-parse/brow
 export type { Options, Parser } from 'csv-parse/browser/esm';
 
 // ── DPUse Framework
-import { getValueDelimiterCharacter, ignoreErrors, parseDelimitedText, resolveDecoderId } from '@dpuse/dpuse-shared';
+import { getValueDelimiterCharacter, ignoreErrors, parseDelimitedPreview, resolveDecoderId } from '@dpuse/dpuse-shared';
 import type {
     ParsedRecord,
     ParsedRecordsChunk,
+    ParsePreviewOptions,
+    ParsePreviewResult,
     ParserInterface,
     ParseStreamOptions,
     ParseStreamSummary,
-    ParseTextOptions,
-    ParseTextResult,
     SampleIssue,
     ValueDelimiterId
 } from '@dpuse/dpuse-shared';
@@ -62,7 +62,7 @@ const DEFAULT_OPTIONS: Options = {
     relax_column_count_less: false,
     relax_column_count_more: false,
     // TODO: Offer relaxed quotes as a choice, for files the user knows are messy, e.g. a stray quote in '5" screen'.
-    // Strict parsing stays the default. 'parseText' for the preview and the connectors' full reads would both take the
+    // Strict parsing stays the default. 'parsePreview' for the preview and the connectors' full reads would both take the
     // user's choice, so the two always read a file the same way. It belongs with the planned 'Read as' override.
     relax_quotes: false,
     rtrim: false,
@@ -144,11 +144,13 @@ export class Tool implements ParserInterface {
     }
 
     /**
-     * Parse text. 'isComplete' says whether the text is the whole file rather than a preview of its start, so a quote
-     * still open at its end is an error rather than a value the preview cut off.
+     * Parse preview. Reads the text decoded from the preview's bytes with the decoder 'parseStream' uses. 'isComplete'
+     * says whether the preview is the whole file rather than its start, so a quote still open at its end is an error
+     * rather than a value the preview cut off.
      */
-    async parseText(text: string, options: ParseTextOptions): Promise<ParseTextResult> {
-        return await parseDelimitedText(text, options, parseTextWithDelimiter); // The choice of delimiter is shared, so every parser makes it the same way.
+    async parsePreview(bytes: Uint8Array, options: ParsePreviewOptions): Promise<ParsePreviewResult> {
+        // The choice of delimiter is shared, so every parser makes it the same way.
+        return await parseDelimitedPreview(bytes, options, ({ text }, delimiter, isComplete) => parseTextWithDelimiter(text, delimiter, isComplete));
     }
 }
 
