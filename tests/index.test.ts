@@ -57,11 +57,11 @@ describe('Tool', () => {
             ]);
         });
 
-        // The record separator's id is the text '0x1E', so the parser must be given the character itself.
-        it('splits values on the record separator character', async () => {
-            const result = await parsePreview('name\u{1E}age\nAda\u{1E}36\n', ['0x1E']);
+        // The unit separator's id is the text '0x1F', so the parser must be given the character itself.
+        it('splits values on the unit separator character', async () => {
+            const result = await parsePreview('name\u{1F}age\nAda\u{1F}36\n', ['0x1F']);
 
-            expect(result.valueDelimiterId).toBe('0x1E');
+            expect(result.valueDelimiterId).toBe('0x1F');
             expect(result.parsedRecords).toEqual([
                 ['name', 'age'],
                 ['Ada', '36']
